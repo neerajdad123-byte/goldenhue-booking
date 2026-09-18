@@ -7,6 +7,10 @@ outputs/demo/goldenhue.db-shm
 # of Chrome state and must never enter the repository.
 work/chrome-*/
 
+# Staging directories for the published preview. They are their own git repos and
+# must never be nested inside this one.
+work/ghpages*/
+
 # Scratch output: logs and captured browser state.
 work/*.log
 work/*.err.log
