@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Front desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body class="admin">
+
+<div class="demo-strip">
+  <span class="demo-badge">Front desk</span>
+  <span class="live-badge" id="liveBadge" hidden>Preview</span>
+  <span class="strip-spacer"></span>
+  <label class="demo-picker">
+    <span>Salon</span>
+    <select id="salonPicker" aria-label="Switch salon"></select>
+  </label>
+  <a class="mini-btn ghost" href="./">Booking page</a>
+</div>
+
+<header class="admin-head">
+  <div>
+    <p class="kicker" id="adminSalon">Goldenhue Studio</p>
+    <h1 class="admin-title" id="dayTitle">Today</h1>
+    <p class="sub" id="daySub"></p>
+  </div>
+  <nav class="daynav" aria-label="Choose a day">
+    <button type="button" class="btn quiet" id="prevDay" aria-label="Previous day">&larr;</button>
+    <button type="button" class="btn" id="todayBtn">Today</button>
+    <button type="button" class="btn quiet" id="nextDay" aria-label="Next day">&rarr;</button>
+  </nav>
+</header>
+
+<main class="admin-main">
+
+  <section class="stats" id="stats" aria-label="Day at a glance"></section>
+
+  <section class="card panel" aria-labelledby="diaryHead">
+    <h2 class="card-head" id="diaryHead">The day, by stylist</h2>
+    <p class="card-note">Live from the diary. Refreshes itself when someone books.</p>
+    <div class="lanes" id="lanes"></div>
+  </section>
+
+  <section class="card panel" aria-labelledby="svcHead">
+    <h2 class="card-head" id="svcHead">Services</h2>
+    <p class="card-note">Price, how long it takes, and the turnaround you need before the next customer. Changing these changes what the booking page offers, immediately.</p>
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr><th scope="col">Service</th><th scope="col">Price</th><th scope="col">Minutes</th><th scope="col">Turnaround</th><th scope="col">Bookable</th><th scope="col"></th></tr>
+        </thead>
+        <tbody id="svcRows"></tbody>
+      </table>
+    </div>
+    <p class="form-error" id="svcError" hidden></p>
+  </section>
+
+  <section class="card panel" aria-labelledby="hrsHead">
+    <h2 class="card-head" id="hrsHead">Working hours</h2>
+    <p class="card-note">The weekly pattern each stylist works. A day switched off stops being bookable for them straight away.</p>
+    <div class="hours" id="hours"></div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast" role="alert" aria-live="assertive" hidden></div>
+
+<script src="engine.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

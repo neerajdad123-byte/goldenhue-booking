@@ -4,6 +4,9 @@
 
 **Hosted:** https://neerajdad123-byte.github.io/goldenhue-booking/ — the design, live, for anyone.
 
+The salon's own console runs at **http://localhost:3000/admin** alongside the
+booking page. It is not hosted, because it writes.
+
 **With the real backend:**
 
 ```
@@ -30,7 +33,7 @@ index.html?salon=cuttingroom&service=cr-cut&staff=arjun&day=1&step=3
 | P0 — the rules | Availability engine: hours, breaks, leave, holidays, buffers, lead time, service duration. Booking, conflict handling, cancellation. | **Done and tested** — 23 assertions in `test-engine.js` |
 | P1 — the booking flow | The five screens a customer walks through, on the real rules, at every width, with photography and motion. | **Done as a preview** — 52 end-to-end checks in `work/flow.js` |
 | P2 — the backend | A real database, server-computed availability, atomic booking, live updates. | **Done** — 47 HTTP checks in `work/api-test.js` |
-| P3 — the admin console | Services, staff, weekly schedules, leave, day view, walk-in bookings. | Not started |
+| P3 — the admin console | The day by stylist, editable services, and each stylist's working week. | **Done** — 27 checks in `work/admin-test.js` |
 | P4 — white-label finish | Subdomains, custom domains, confirmation email, .ics, cancel links. | Not started |
 
 **Roughly 20% of the finished product**, but the two things that decide whether the rest is easy — the availability rules and the double-booking defence — are settled, written down and verified. The remaining 80% is mostly screens and plumbing against a design that no longer moves.
@@ -96,6 +99,22 @@ Restraint was the rule: nothing animates on a control people hit constantly, and
 | Choosing a day | One pill slides between dates | Continuity instead of a repaint |
 | Choosing a time | A ring fires on the bar, the total flips digit by digit | Confirms a decision |
 | Confirming | A stub arrives with a stamp that thwacks in, then one sweep of light | The one moment worth remembering |
+
+## The front desk
+
+The salon runs itself from `/admin`:
+
+- **The day, by stylist** — who is in, what they are booked for, how much chair time
+  is sold, and the day's takings. Refreshes itself when a booking lands, so the
+  screen on the counter never disagrees with the phone in a customer's hand.
+- **Services** — price, minutes, and the turnaround before the next customer.
+- **Working hours** — each stylist's week, day by day.
+
+Those last two are not cosmetic: they are the same data availability is computed
+from. The tests prove it by editing a price and watching the booking page offer it,
+lengthening a service and watching the day lose slots, and switching a day off and
+watching that stylist disappear from it. The server validates every edit too, so a
+typo is refused rather than allowed to break the diary.
 
 ## What the preview actually proves
 

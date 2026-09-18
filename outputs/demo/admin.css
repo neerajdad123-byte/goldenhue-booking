@@ -1,0 +1,113 @@
+/* Front desk styling. Same tokens and type as the booking page, laid out as a
+   working surface rather than a shop window: wider, denser, no photography. */
+
+.strip-spacer { margin-right: auto; }
+
+/* A working surface needs cards to separate from the page: white cards on a
+   slightly deeper tint, rather than white on near-white. */
+.admin { background: var(--room-2); }
+.admin .demo-strip { background: var(--void); }
+
+.admin-head {
+  display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end; justify-content: space-between;
+  padding: clamp(22px, 3vw, 36px) clamp(16px, 3vw, 40px) 20px;
+  background: var(--void); border-bottom: 1px solid var(--edge);
+}
+.admin-title {
+  font-family: var(--display); font-weight: 500; letter-spacing: -.015em;
+  font-size: clamp(1.8rem, 3.6vw, 2.6rem); line-height: 1.1; margin-top: 6px;
+}
+.daynav { display: flex; gap: 8px; }
+.daynav .btn { padding: 11px 16px; }
+
+.admin-main {
+  display: grid; gap: clamp(16px, 2vw, 24px);
+  padding: clamp(16px, 3vw, 40px);
+  max-width: 1200px; margin: 0 auto;
+}
+.admin .card { background: var(--void); }
+.card-head { font-family: var(--display); font-weight: 500; font-size: 1.24rem; letter-spacing: -.01em; }
+.card-note { margin-top: 6px; color: var(--ink-2); font-size: .86rem; max-width: 68ch; text-wrap: pretty; }
+.admin .panel { padding: clamp(18px, 2.4vw, 26px); }
+
+/* ---------- the day at a glance ---------- */
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stat { background: var(--void); border: 1px solid var(--edge); border-radius: 4px; padding: 16px 18px; }
+.stat .k { font-size: .6rem; letter-spacing: .2em; text-transform: uppercase; color: var(--ink-3); }
+.stat .v { font-family: var(--display); font-weight: 500; font-size: 1.9rem; line-height: 1.1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.stat .n { font-size: .78rem; color: var(--ink-2); margin-top: 4px; }
+
+/* ---------- one column per stylist ---------- */
+
+.lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-top: 20px; }
+.lane { border: 1px solid var(--edge); border-radius: 4px; overflow: hidden; background: var(--room); }
+.lane-top { padding: 13px 15px; border-bottom: 1px solid var(--edge); display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.lane-name { font-family: var(--display); font-weight: 500; font-size: 1.06rem; }
+.lane-hours { font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-top: 3px; }
+.lane-load { font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--brand-deep); white-space: nowrap; }
+.lane.off .lane-load { color: var(--ink-3); }
+.lane-body { padding: 10px; display: grid; gap: 8px; }
+.appt {
+  display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 12px;
+  padding: 11px 12px; background: var(--void); border-radius: 3px;
+  border-left: 3px solid var(--brand); animation: row-in var(--t-state) var(--ease-out) both;
+}
+.appt-time { font-family: var(--display); font-weight: 500; font-size: .92rem; font-variant-numeric: tabular-nums; }
+.appt-what { font-size: .88rem; font-weight: 600; }
+.appt-who { font-size: .78rem; color: var(--ink-2); margin-top: 3px; }
+.appt-ref { font-size: .64rem; letter-spacing: .12em; color: var(--ink-3); margin-top: 5px; }
+.lane-empty { padding: 18px 14px; text-align: center; color: var(--ink-3); font-size: .82rem; }
+.lane-off { padding: 22px 14px; text-align: center; color: var(--ink-3); font-style: italic; font-size: .84rem; }
+
+/* ---------- tables and forms ---------- */
+
+.table-wrap { margin-top: 18px; overflow-x: auto; }
+.grid { width: 100%; border-collapse: collapse; min-width: 640px; }
+.grid th {
+  text-align: left; font-size: .6rem; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600; padding: 0 12px 10px 0; border-bottom: 1px solid var(--edge);
+}
+.grid td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--edge-2); vertical-align: middle; }
+.grid td:last-child, .grid th:last-child { text-align: right; padding-right: 0; }
+.grid .name { font-weight: 600; font-size: .9rem; }
+.grid .cat { display: block; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-top: 3px; }
+
+.num, .time {
+  font: inherit; color: var(--ink); background: var(--room);
+  border: 1px solid var(--edge); border-radius: 3px; padding: 9px 10px;
+  font-variant-numeric: tabular-nums; width: 100%; max-width: 130px; font-size: 16px;
+  transition: border-color var(--t-state) var(--ease-out);
+}
+.num:focus, .time:focus { outline: none; border-color: var(--brand); }
+.money { display: flex; align-items: center; gap: 6px; }
+.money span { color: var(--ink-3); font-size: .9rem; }
+
+.toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: .84rem; }
+.toggle input { width: 18px; height: 18px; accent-color: var(--brand-deep); cursor: pointer; }
+
+.hours { display: grid; gap: 22px; margin-top: 18px; }
+.person { border: 1px solid var(--edge); border-radius: 4px; overflow: hidden; }
+.person-top { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; padding: 13px 15px; background: var(--room); border-bottom: 1px solid var(--edge); }
+.person-name { font-family: var(--display); font-weight: 500; font-size: 1.06rem; }
+.person-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.days { display: grid; }
+.dayrow {
+  display: grid; grid-template-columns: 120px 92px minmax(0, 1fr); gap: 12px; align-items: center;
+  padding: 10px 15px; border-bottom: 1px solid var(--edge-2);
+}
+.dayrow:last-child { border-bottom: 0; }
+.dayrow .d { font-size: .82rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+.dayrow .times { display: flex; align-items: center; gap: 8px; }
+.dayrow .times .to { color: var(--ink-3); font-size: .8rem; }
+.dayrow .time { max-width: 118px; }
+.dayrow.off .times { opacity: .35; pointer-events: none; }
+
+@media (max-width: 620px) {
+  .dayrow { grid-template-columns: 1fr; gap: 8px; }
+  .dayrow .times { justify-content: flex-start; }
+}
+
+@media (min-width: 900px) {
+  .admin-main { grid-template-columns: minmax(0, 1fr); }
+}

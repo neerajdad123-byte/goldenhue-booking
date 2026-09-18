@@ -10,6 +10,10 @@ record, not a deployment.
 Then open http://localhost:3000. First run creates `goldenhue.db` and seeds it with
 a few example bookings so the diary does not look empty.
 
+The salon's own console is at http://localhost:3000/admin: the day by stylist,
+editable prices and durations, and each stylist's working week. Change anything
+there and the booking page follows immediately.
+
 The same folder also works as a plain static page. Opened straight from disk it
 runs in preview mode: everything behaves the same, but bookings stay in the tab.
 The badge in the header says which mode you are in.
@@ -36,6 +40,10 @@ The badge in the header says which mode you are in.
 | `GET /api/appointments-range?salon&from&to` | A window of bookings |
 | `GET /api/stream?salon` | Server-sent events: bookings and cancellations as they happen |
 | `GET /health` | Liveness and the appointment count |
+| `GET /api/admin/summary?salon&date` | The day: a lane per stylist, bookings, takings |
+| `GET /api/admin/config?salon` | Services, and each stylist's working week |
+| `POST /api/admin/service` | Change a service's price, duration, turnaround or availability |
+| `POST /api/admin/hours` | Replace a stylist's weekly pattern |
 
 ## Tests
 

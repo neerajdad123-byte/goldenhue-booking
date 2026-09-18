@@ -25,7 +25,14 @@ var DB_FILE = process.env.DB_FILE || path.join(ROOT, 'goldenhue.db');
 
 /* The rules live in engine.js, which is the same file the browser loads. The
    server owns the clock and the data; the engine owns the arithmetic. */
-var state = GH.createState(DATA);
+/* Two views of the same thing. `catalog` is the raw shape the page and the engine
+   both understand, and it is what the admin edits. `state` is derived from it and
+   is what availability is computed against. Change the catalog, rebuild the state,
+   and everything downstream follows. */
+var catalog = JSON.parse(JSON.stringify({
+  salons: DATA.salons, services: DATA.services, staff: DATA.staff, salonsClosed: DATA.salonsClosed
+}));
+var state = GH.createState(catalog);
 
 var db = new DatabaseSync(DB_FILE);
 db.exec('PRAGMA journal_mode = WAL');
@@ -64,6 +71,85 @@ var byDay = db.prepare(`SELECT * FROM appointment
 
 var byRef = db.prepare('SELECT * FROM appointment WHERE ref = ?');
 
+/* ---------- the salon's own settings, which the admin console edits ---------- */
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS service_setting (
+    service_id   TEXT PRIMARY KEY,
+    price        INTEGER NOT NULL,
+    duration_min INTEGER NOT NULL,
+    buffer_min   INTEGER NOT NULL,
+    active       INTEGER NOT NULL DEFAULT 1,
+    updated_at   TEXT NOT NULL
+  );
+  /* Weekday is the real one: 0 Sunday through 6 Saturday, matching Date.getDay.
+     More than one row per weekday is allowed, for a split shift. */
+  CREATE TABLE IF NOT EXISTS staff_hours (
+    staff_id  TEXT NOT NULL,
+    weekday   INTEGER NOT NULL,
+    start_min INTEGER NOT NULL,
+    end_min   INTEGER NOT NULL,
+    PRIMARY KEY (staff_id, weekday, start_min)
+  );
+`);
+
+function seedSettings() {
+  if (db.prepare('SELECT COUNT(*) AS n FROM service_setting').get().n === 0) {
+    var put = db.prepare('INSERT INTO service_setting (service_id, price, duration_min, buffer_min, active, updated_at) VALUES (?,?,?,?,?,?)');
+    for (var s of catalog.services) {
+      put.run(s.id, s.price, s.durationMin, s.bufferMin || 0, 1, new Date().toISOString());
+    }
+  }
+  if (db.prepare('SELECT COUNT(*) AS n FROM staff_hours').get().n === 0) {
+    var putH = db.prepare('INSERT OR IGNORE INTO staff_hours (staff_id, weekday, start_min, end_min) VALUES (?,?,?,?)');
+    for (var st of catalog.staff) {
+      /* the raw catalogue lists the week Monday first, so rotate to real weekdays */
+      (st.hours || []).forEach(function (str, i) {
+        var weekday = (i + 1) % 7;
+        GH.parseWindows(str).forEach(function (w) { putH.run(st.id, weekday, w.start, w.end); });
+      });
+    }
+  }
+}
+
+function hm(mins) { return GH.hmOfMinutes(mins); }
+
+/* Put the salon's saved settings back onto the raw catalogue. */
+function applySettings() {
+  var byId = {};
+  db.prepare('SELECT * FROM service_setting').all().forEach(function (r) { byId[r.service_id] = r; });
+  catalog.services.forEach(function (s) {
+    var r = byId[s.id];
+    if (!r) { return; }
+    s.price = r.price;
+    s.durationMin = r.duration_min;
+    s.bufferMin = r.buffer_min;
+    s.active = !!r.active;
+  });
+
+  var hours = {};
+  db.prepare('SELECT * FROM staff_hours ORDER BY staff_id, weekday, start_min').all().forEach(function (h) {
+    if (!hours[h.staff_id]) { hours[h.staff_id] = {}; }
+    if (!hours[h.staff_id][h.weekday]) { hours[h.staff_id][h.weekday] = []; }
+    hours[h.staff_id][h.weekday].push(hm(h.start_min) + '-' + hm(h.end_min));
+  });
+  catalog.staff.forEach(function (st) {
+    var mine = hours[st.id];
+    if (!mine) { return; }
+    /* back to the Monday-first shape the engine and the page both expect */
+    st.hours = [0, 1, 2, 3, 4, 5, 6].map(function (i) {
+      var wd = (i + 1) % 7;
+      return (mine[wd] && mine[wd].length) ? mine[wd].join(',') : 'OFF';
+    });
+  });
+}
+
+function rebuild() {
+  applySettings();
+  state = GH.createState(catalog);
+  loadAppointments();
+}
+
 /* The guard. Half-open: 10:00-12:00 and 12:00-12:30 do not clash, 11:59 does. */
 var clash = db.prepare(`SELECT ref FROM appointment
   WHERE salon_id = ? AND staff_id = ? AND day = ?
@@ -72,6 +158,8 @@ var clash = db.prepare(`SELECT ref FROM appointment
   LIMIT 1`);
 
 /* ---------- mirror the database into the engine's shape ---------- */
+
+function salonById(id) { return state.salons.filter(function (s) { return s.id === id; })[0]; }
 
 function rowToAppointment(r) {
   return {
@@ -323,7 +411,10 @@ function readBody(req) {
 }
 
 function serveStatic(req, res, urlPath) {
-  var rel = urlPath === '/' ? '/index.html' : urlPath;
+  /* the front desk lives at /admin, next to the customer page at / */
+  var rel = urlPath === '/' ? '/index.html'
+    : (urlPath === '/admin' || urlPath === '/admin/') ? '/admin.html'
+    : urlPath;
   var cleaned = path.normalize(rel).replace(/^([/\\])+/, '');
   var full = path.join(ROOT, cleaned);
   /* never serve outside the demo folder */
@@ -359,13 +450,124 @@ var server = http.createServer(async function (req, res) {
        page builds its state from the same data the server uses. */
     if (route === '/api/catalog') {
       return send(res, 200, {
-        salons: DATA.salons, services: DATA.services, staff: DATA.staff,
-        salonsClosed: DATA.salonsClosed,
+        salons: catalog.salons, services: catalog.services, staff: catalog.staff,
+        salonsClosed: catalog.salonsClosed,
         /* bookings are not part of the catalogue: they come from the database via
            the range endpoint, so say so explicitly rather than leaving it out */
         appointments: [],
         serverNow: new Date().toISOString()
       });
+    }
+
+    /* ---------- the admin console ---------- */
+
+    if (route === '/api/admin/summary') {
+      if (!q.salon || !q.date) { return send(res, 400, { error: 'salon and date are required' }); }
+      var rows = byDay.all(q.salon, q.date);
+      var dayStaff = GH.staffForSalon(state, q.salon);
+      var lanes = dayStaff.map(function (st) {
+        var windows = GH.staffWindows(st, salonById(q.salon), q.date);
+        return {
+          staffId: st.id, name: st.name, title: st.title,
+          working: windows.length > 0,
+          hours: windows.map(function (w) { return hm(w.start) + '-' + hm(w.end); }).join(', '),
+          bookedMinutes: rows.filter(function (r) { return r.staff_id === st.id; })
+            .reduce(function (n, r) { return n + (r.end_min - r.start_min); }, 0),
+          appointments: rows.filter(function (r) { return r.staff_id === st.id; }).map(rowToAppointment)
+        };
+      });
+      var revenue = rows.reduce(function (n, r) { return n + r.price; }, 0);
+      return send(res, 200, {
+        date: q.date, salonId: q.salon, lanes: lanes,
+        totalAppointments: rows.length, revenue: revenue
+      });
+    }
+
+    if (route === '/api/admin/config') {
+      if (!q.salon) { return send(res, 400, { error: 'salon is required' }); }
+      var svc = db.prepare('SELECT * FROM service_setting').all();
+      var mine = {};
+      svc.forEach(function (r) { mine[r.service_id] = r; });
+      return send(res, 200, {
+        salonId: q.salon,
+        dayNames: GH.DAY_NAMES,
+        services: catalog.services.filter(function (s) { return s.salonId === q.salon; }).map(function (s) {
+          var r = mine[s.id] || {};
+          return {
+            id: s.id, name: s.name, category: s.category, photo: s.photo,
+            price: r.price != null ? r.price : s.price,
+            durationMin: r.duration_min != null ? r.duration_min : s.durationMin,
+            bufferMin: r.buffer_min != null ? r.buffer_min : (s.bufferMin || 0),
+            active: r.active != null ? !!r.active : true
+          };
+        }),
+        staff: catalog.staff.filter(function (x) { return x.salonId === q.salon; }).map(function (st) {
+          var week = {};
+          db.prepare('SELECT weekday, start_min, end_min FROM staff_hours WHERE staff_id = ? ORDER BY weekday, start_min')
+            .all(st.id).forEach(function (h) {
+              if (!week[h.weekday]) { week[h.weekday] = { startMin: h.start_min, endMin: h.end_min, extra: [] }; }
+              else { week[h.weekday].extra.push({ startMin: h.start_min, endMin: h.end_min }); }
+            });
+          return {
+            id: st.id, name: st.name, title: st.title,
+            services: st.services,
+            week: [0, 1, 2, 3, 4, 5, 6].map(function (wd) {
+              var w = week[wd];
+              return { weekday: wd, working: !!w, startMin: w ? w.startMin : 540, endMin: w ? w.endMin : 1080 };
+            })
+          };
+        })
+      });
+    }
+
+    if (route === '/api/admin/service' && req.method === 'POST') {
+      var sbody = await readBody(req);
+      var svcRow = catalog.services.filter(function (s) { return s.id === sbody.serviceId; })[0];
+      if (!svcRow) { return send(res, 404, { error: 'No such service' }); }
+      var price = Math.round(Number(sbody.price));
+      var duration = Math.round(Number(sbody.durationMin));
+      var buffer = Math.round(Number(sbody.bufferMin));
+      if (!isFinite(price) || price < 0 || price > 100000000) { return send(res, 400, { error: 'Price must be a whole number of paise, up to 10 lakh' }); }
+      if (!isFinite(duration) || duration < 5 || duration > 600) { return send(res, 400, { error: 'Duration must be between 5 and 600 minutes' }); }
+      if (!isFinite(buffer) || buffer < 0 || buffer > 120) { return send(res, 400, { error: 'Turnaround must be between 0 and 120 minutes' }); }
+      db.prepare(`INSERT INTO service_setting (service_id, price, duration_min, buffer_min, active, updated_at)
+        VALUES (?,?,?,?,?,?)
+        ON CONFLICT(service_id) DO UPDATE SET price=excluded.price, duration_min=excluded.duration_min,
+          buffer_min=excluded.buffer_min, active=excluded.active, updated_at=excluded.updated_at`)
+        .run(svcRow.id, price, duration, buffer, sbody.active === false ? 0 : 1, new Date().toISOString());
+      rebuild();
+      broadcast(svcRow.salonId, { type: 'settings', serviceId: svcRow.id });
+      return send(res, 200, { ok: true, serviceId: svcRow.id, price: price, durationMin: duration, bufferMin: buffer });
+    }
+
+    if (route === '/api/admin/hours' && req.method === 'POST') {
+      var hbody = await readBody(req);
+      var who = catalog.staff.filter(function (s) { return s.id === hbody.staffId; })[0];
+      if (!who) { return send(res, 404, { error: 'No such stylist' }); }
+      if (!Array.isArray(hbody.week) || hbody.week.length !== 7) { return send(res, 400, { error: 'Send all seven days' }); }
+      for (var day of hbody.week) {
+        var wd = Math.round(Number(day.weekday));
+        if (!(wd >= 0 && wd <= 6)) { return send(res, 400, { error: 'Bad weekday' }); }
+        if (!day.working) { continue; }
+        var a = Math.round(Number(day.startMin)), b = Math.round(Number(day.endMin));
+        if (!isFinite(a) || !isFinite(b) || a < 0 || b > 1440 || b - a < 15) {
+          return send(res, 400, { error: 'Each working day needs a start and an end at least 15 minutes apart' });
+        }
+      }
+      var clear = db.prepare('DELETE FROM staff_hours WHERE staff_id = ?');
+      var add = db.prepare('INSERT INTO staff_hours (staff_id, weekday, start_min, end_min) VALUES (?,?,?,?)');
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        clear.run(who.id);
+        hbody.week.forEach(function (day) {
+          if (!day.working) { return; }
+          add.run(who.id, Math.round(Number(day.weekday)), Math.round(Number(day.startMin)), Math.round(Number(day.endMin)));
+        });
+        db.exec('COMMIT');
+      } catch (e) { try { db.exec('ROLLBACK'); } catch (x) {} throw e; }
+      rebuild();
+      broadcast(who.salonId, { type: 'settings', staffId: who.id });
+      return send(res, 200, { ok: true, staffId: who.id });
     }
 
     /* Every live appointment in a window, for the page to mirror so it can keep
@@ -448,7 +650,8 @@ var server = http.createServer(async function (req, res) {
 });
 
 seedIfEmpty();
-loadAppointments();
+seedSettings();
+rebuild();
 
 server.listen(PORT, function () {
   console.log('Goldenhue booking server on http://localhost:' + PORT);

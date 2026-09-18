@@ -76,6 +76,13 @@ if ($api) {
     Write-Host "   $audit"
     if ($audit -notmatch '^0 findings') { $fail = 1 }
   }
+
+  if ($cdp) {
+    Write-Host "== the front desk"
+    $admin = node work/admin-test.js $cdp $api/ | Select-Object -Last 1
+    Write-Host "   $admin"
+    if ($LASTEXITCODE -ne 0) { $fail = 1 }
+  }
 } else {
   Write-Host "== API checks skipped (set GOLDENHUE_API, for example http://localhost:3000)"
 }

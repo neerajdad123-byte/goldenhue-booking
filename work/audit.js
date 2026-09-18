@@ -8,7 +8,8 @@ var WIDTHS = [320, 360, 390, 430, 768, 1024, 1280, 1440, 1920];
 var PATHS = [
   { name: 'services', q: '' },
   { name: 'crew', q: '?service=gh-colour&staff=any&step=2' },
-  { name: 'diary', q: '?service=gh-colour&staff=any&day=1&step=3' }
+  { name: 'diary', q: '?service=gh-colour&staff=any&day=1&step=3' },
+  { name: 'frontdesk', q: 'admin', append: true }
 ];
 
 var PROBE = `(async () => {
@@ -221,7 +222,7 @@ function onceOrTimeout(ws, event, ms) {
     for (var w of WIDTHS) {
       await rpc(ws, st, 'Emulation.setDeviceMetricsOverride', { width: w, height: 900, deviceScaleFactor: 1, mobile: w <= 480 });
       var loaded = onceOrTimeout(ws, 'Page.loadEventFired', 12000);
-      await rpc(ws, st, 'Page.navigate', { url: URL_ + p.q });
+      await rpc(ws, st, 'Page.navigate', { url: p.append ? URL_.replace(/\/?$/, '/') + p.q : URL_ + p.q });
       await loaded;
       var res = await rpc(ws, st, 'Runtime.evaluate', { expression: PROBE, awaitPromise: true, returnByValue: true });
       if (res.exceptionDetails) {
