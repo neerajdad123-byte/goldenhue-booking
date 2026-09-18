@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B0B0D">
+<title>Book an appointment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6 3h3l2 5-2.2 1.6a12 12 0 0 0 5.6 5.6L16 13l5 2v3a2 2 0 0 1-2.2 2A16 16 0 0 1 4 5.2A2 2 0 0 1 6 3z"/></symbol>
+  <symbol id="i-empty" viewBox="0 0 24 24"><path d="M4 19V7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5V19z"/><path d="M4 12h5l1.5 2h3L15 12h5"/></symbol>
+</svg>
+
+<div class="demo-strip">
+  <span class="demo-badge">Demo</span>
+  <span class="live-badge" id="liveBadge" hidden>Preview</span>
+  <label class="demo-picker">
+    <span>Salon</span>
+    <select id="salonPicker" aria-label="Switch salon"></select>
+  </label>
+  <button class="mini-btn" id="rivalBtn" type="button" disabled>Rival booking</button>
+  <button class="mini-btn ghost" id="resetBtn" type="button">Reset</button>
+  <a class="mini-btn ghost" href="admin">Front desk</a>
+</div>
+
+<div class="frame">
+
+  <aside class="sign">
+    <div class="sign-slot">
+      <h1 class="blade" id="brandBlade" aria-label="Salon name"></h1>
+    </div>
+    <div class="sign-rule" aria-hidden="true"></div>
+    <figure class="cover" id="cover" aria-hidden="true">
+      <img id="coverImg" alt="" decoding="async">
+    </figure>
+    <div class="sign-foot">
+      <p class="sign-state" id="signState"></p>
+      <p class="sign-line" id="signTagline"></p>
+      <dl class="sign-facts">
+        <div><dt><svg class="ico"><use href="#i-pin"></use></svg>Find us</dt><dd id="signAddress"></dd></div>
+        <div><dt><svg class="ico"><use href="#i-phone"></use></svg>Call</dt><dd id="signPhone"></dd></div>
+      </dl>
+      <p class="sign-small" id="signPolicy"></p>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <header class="stage-head" id="stageHead">
+      <p class="kicker" id="stepKicker">01 / Service</p>
+      <h2 class="headline" id="stepHeadline">What are we doing today?</h2>
+      <p class="sub" id="stepSub"></p>
+      <div class="head-tools">
+        <button type="button" class="next-free" id="nextFreeBtn">
+          <span class="nf-dot"></span>
+          <span class="nf-text" id="nextFreeText">Finding the soonest chair</span>
+        </button>
+      </div>
+      <nav class="crumbs" id="stepper" aria-label="Booking steps">
+        <button type="button" class="crumb" data-step="1"><span class="crumb-n">1</span>Service</button>
+        <button type="button" class="crumb" data-step="2"><span class="crumb-n">2</span>Stylist</button>
+        <button type="button" class="crumb" data-step="3"><span class="crumb-n">3</span>Time</button>
+        <button type="button" class="crumb" data-step="4"><span class="crumb-n">4</span>Details</button>
+      </nav>
+    </header>
+
+    <section class="panel" id="panel-1">
+      <div class="peek" id="peek" aria-hidden="true"><img id="peekImg" alt=""><span class="peek-label" id="peekLabel"></span></div>
+      <div class="filters" id="filters" role="group" aria-label="Filter by category"></div>
+      <ul class="menu" id="serviceList"></ul>
+      <section class="gallery" id="gallery" aria-label="Work from the salon">
+        <div class="gallery-run" id="galleryRun"></div>
+      </section>
+      <section class="reviews reveal" id="reviews" aria-label="Sample reviews">
+        <p class="reviews-note">Sample reviews, shown to demonstrate the layout.</p>
+        <div class="reviews-track" id="reviewsTrack"></div>
+      </section>
+    </section>
+
+    <section class="panel" id="panel-2" hidden>
+      <ul class="crew" id="staffList"></ul>
+    </section>
+
+    <section class="panel" id="panel-3" hidden>
+      <div class="dayrail" id="dayRail" role="group" aria-label="Choose a day"></div>
+      <div class="rail-scroll" id="railScroll"></div>
+      <p class="rail-key" id="railKey">
+        <span class="key-item"><span class="key-swatch lit"></span>Free</span>
+        <span class="key-item"><span class="key-swatch taken"></span>Booked</span>
+        <span class="key-item"><span class="key-swatch short"></span>Too short for this service</span>
+      </p>
+      <div class="slot-area" id="slotArea"></div>
+    </section>
+
+    <section class="panel" id="panel-4" hidden>
+      <form id="detailsForm" class="form" novalidate>
+        <div class="field-row">
+          <label class="field"><span>Your name</span>
+            <input id="fName" autocomplete="name" placeholder="Kavya Sharma" required></label>
+          <label class="field"><span>Mobile</span>
+            <input id="fPhone" inputmode="tel" autocomplete="tel" placeholder="98765 43210" required></label>
+        </div>
+        <label class="field"><span>Email <em>for the confirmation</em></span>
+          <input id="fEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
+        <label class="field"><span>Anything we should know? <em>optional</em></span>
+          <textarea id="fNote" rows="2" placeholder="Allergies, preferred style, running late..."></textarea></label>
+        <p class="form-error" id="formError" hidden></p>
+        <button class="btn solid" id="confirmBtn" type="submit">Lock it in</button>
+      </form>
+    </section>
+
+    <section class="panel confirm" id="panel-5" hidden>
+      <article class="stub" id="stub">
+        <div class="stub-top">
+          <span class="stub-salon" id="stubSalon"></span>
+          <span class="stub-stamp" id="stubStamp">Confirmed</span>
+        </div>
+        <h3 class="stub-title" id="stubTitle"></h3>
+        <p class="stub-sub" id="stubSub"></p>
+        <div class="stub-ref"><span>Reference</span><strong id="stubRef"></strong></div>
+        <dl class="stub-list" id="stubList"></dl>
+        <div class="stub-actions">
+          <button class="btn" id="icsBtn" type="button">Calendar file</button>
+          <button class="btn" id="cancelBtn" type="button">Cancel it</button>
+          <button class="btn quiet" id="againBtn" type="button">Book another</button>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <aside class="clip" aria-label="Your selection">
+    <div class="clip-tag" id="clipTag"></div>
+  </aside>
+
+</div>
+
+<footer class="foot" id="foot"></footer>
+
+<div class="bar" id="actionBar" hidden></div>
+<div class="toast" id="toast" role="alert" aria-live="assertive" hidden></div>
+
+<script src="data.js"></script>
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

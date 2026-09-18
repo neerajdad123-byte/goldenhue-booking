@@ -1,0 +1,35 @@
+{
+  "note": "Placeholder photography for the Goldenhue demo. Replace with the salon own photos before launch.",
+  "images": [
+    {
+      "slot": "cover-blushbloom",
+      "file": "cover-blushbloom.jpg",
+      "query": "<div class='fn'> <i>Pocket Manicure </i></div>",
+      "title": "<div class='fn'> <i>Pocket Manicure </i></div>",
+      "creator": "Alfred Walbeck",
+      "license": "CC0 1.0",
+      "source": "https://commons.wikimedia.org/w/index.php?curid=81990083",
+      "bytes": 5771970
+    },
+    {
+      "slot": "craft-4",
+      "file": "craft-4.jpg",
+      "query": "<div class='fn'> <i>Pocket Manicure </i></div>",
+      "title": "<div class='fn'> <i>Pocket Manicure </i></div>",
+      "creator": "Alfred Walbeck",
+      "license": "CC0 1.0",
+      "source": "https://commons.wikimedia.org/w/index.php?curid=81990083",
+      "bytes": 5771970
+    },
+    {
+      "slot": "craft-6",
+      "file": "craft-6.jpg",
+      "query": "Hair washing by Mikuláš Galanda",
+      "title": "Hair washing by Mikuláš Galanda",
+      "creator": "unknown",
+      "license": "CC0 1.0",
+      "source": "https://www.rawpixel.com/image/8897997/hair-washing-mikulas-galanda",
+      "bytes": 205978
+    }
+  ]
+}
