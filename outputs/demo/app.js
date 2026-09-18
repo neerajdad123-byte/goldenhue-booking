@@ -1006,6 +1006,10 @@
     badge.textContent = on ? 'Live' : 'Preview';
     badge.classList.toggle('off', !on);
     badge.title = note || (on ? 'Connected. Availability and bookings are real.' : 'No server. Bookings stay in this tab.');
+    /* The front desk writes, so it only exists where there is a server. Offering
+       the link without one would be a dead end. */
+    var adminLink = document.getElementById('adminLink');
+    if (adminLink) { adminLink.hidden = !on; }
   }
 
   /* Replace the page's copy of the bookings for the window it can show, so
