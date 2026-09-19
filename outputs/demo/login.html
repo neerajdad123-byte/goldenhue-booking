@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body class="admin signin">
+
+<main class="signin-card">
+  <p class="kicker">Front desk</p>
+  <h1 class="admin-title">Sign in</h1>
+  <p class="sub" id="signinSub">Whoever runs the salon signs in here. Customers never see this page.</p>
+
+  <form id="signinForm" class="form">
+    <label class="field"><span>Salon</span>
+      <select class="num" id="fSalon" style="max-width:none"></select></label>
+    <label class="field"><span>Email</span>
+      <input id="fEmail" type="email" autocomplete="username" placeholder="owner@salon.com" required></label>
+    <label class="field"><span>Password</span>
+      <input id="fPassword" type="password" autocomplete="current-password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" required></label>
+    <p class="form-error" id="signinError" hidden></p>
+    <button class="btn solid wide" id="signinBtn" type="submit">Sign in</button>
+  </form>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var el = function (id) { return document.getElementById(id); };
+
+  fetch('/api/catalog').then(function (r) { return r.json(); }).then(function (body) {
+    var salons = (body && body.salons) || [];
+    el('fSalon').innerHTML = salons.map(function (s) {
+      return '<option value="' + s.id + '">' + s.name + '</option>';
+    }).join('');
+    if (!salons.length) { el('signinSub').textContent = 'No salon is configured on this server.'; }
+  }).catch(function () {
+    el('signinSub').textContent = 'The booking server is not answering.';
+  });
+
+  el('signinForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var err = el('signinError');
+    err.hidden = true;
+    el('signinBtn').disabled = true;
+    el('signinBtn').textContent = 'Checking';
+    fetch('/api/admin/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        salonId: el('fSalon').value,
+        email: el('fEmail').value,
+        password: el('fPassword').value
+      })
+    }).then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
+      .then(function (res) {
+        if (res.status === 200) { window.location.replace('/admin'); return; }
+        err.textContent = res.body.error || 'That did not work.';
+        err.hidden = false;
+        el('signinBtn').disabled = false;
+        el('signinBtn').textContent = 'Sign in';
+        el('fPassword').value = '';
+        el('fPassword').focus();
+      })
+      .catch(function () {
+        err.textContent = 'Could not reach the server.';
+        err.hidden = false;
+        el('signinBtn').disabled = false;
+        el('signinBtn').textContent = 'Sign in';
+      });
+  });
+}());
+</script>
+</body>
+</html>

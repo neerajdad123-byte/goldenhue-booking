@@ -18,6 +18,7 @@ var path = require('path');
 var GH = require('./engine.js');
 var DATA = require('./data.js');
 var { createStore } = require('./store.js');
+var { createAuth, readCookie, cookieHeader } = require('./auth.js');
 
 var ROOT = __dirname;
 var PORT = Number(process.env.PORT || 3000);
@@ -36,6 +37,32 @@ var state = GH.createState(catalog);
 
 var store = createStore(DB_FILE);
 store.init();
+
+var auth = createAuth(store);
+
+/* The first front-desk login comes from the environment, not from a default
+   password in the source and not from the logs. Set ADMIN_PASSWORD (and optionally
+   ADMIN_EMAIL) before the first boot of a deployment. */
+var SESSION_COOKIE = 'gh_session';
+var SESSION_DAYS = 30;
+function bootstrapAdmin() {
+  var email = process.env.ADMIN_EMAIL || 'owner@goldenhue.local';
+  var password = process.env.ADMIN_PASSWORD;
+  var created = [];
+  for (var s of catalog.salons) {
+    if (store.countAdmins(s.id) > 0) { continue; }
+    if (!password) { continue; }
+    if (auth.ensureAdmin(s.id, email, password)) { created.push(s.id); }
+  }
+  if (created.length) { console.log('created front-desk login for: ' + created.join(', ') + ' as ' + email); }
+  else {
+    var missing = catalog.salons.filter(function (s) { return store.countAdmins(s.id) === 0; });
+    if (missing.length) {
+      console.warn('no front-desk login for: ' + missing.map(function (s) { return s.id; }).join(', ') +
+        ' — set ADMIN_PASSWORD before the first boot to create one');
+    }
+  }
+}
 
 function seedSettings() {
   store.seedServiceSettings(catalog.services);
@@ -311,6 +338,18 @@ function send(res, status, body, type) {
   res.end(text);
 }
 
+function redirect(res, to, cookie) {
+  var headers = { location: to, 'cache-control': 'no-store' };
+  if (cookie) { headers['set-cookie'] = cookie; }
+  res.writeHead(302, headers);
+  res.end();
+}
+
+/* Who is asking, if anyone. A signed cookie, checked in constant time. */
+function sessionSalon(req) {
+  return auth.verify(readCookie(req.headers.cookie, SESSION_COOKIE));
+}
+
 function readBody(req) {
   return new Promise(function (resolve, reject) {
     var chunks = [], size = 0;
@@ -379,6 +418,41 @@ var server = http.createServer(async function (req, res) {
 
     /* ---------- the admin console ---------- */
 
+    /* Signing in and out. Everything else under /api/admin sits behind the guard
+       immediately below, so a new admin route cannot forget to ask. */
+    if (route === '/api/admin/login' && req.method === 'POST') {
+      var lbody = await readBody(req);
+      var salonId = String(lbody.salonId || '');
+      var person = GH.getSalon(state, salonId) ? auth.checkLogin(salonId, lbody.email, lbody.password) : null;
+      if (!person) {
+        /* Deliberately the same answer whether the account exists or the password
+           is wrong: telling them apart is a free hint for anyone guessing. */
+        return send(res, 401, { error: 'That email and password do not match.' });
+      }
+        res.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+          'set-cookie': cookieHeader(SESSION_COOKIE, auth.issue(salonId), SESSION_DAYS * 86400)
+        });
+        return res.end(JSON.stringify({ ok: true, salonId: salonId, email: person.email }));
+    }
+
+    if (route === '/api/admin/logout' && req.method === 'POST') {
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+        'set-cookie': cookieHeader(SESSION_COOKIE, '', 0)
+      });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+
+    /* The guard. One place, so every route added later is covered by default. */
+    if (route.indexOf('/api/admin/') === 0) {
+      var mine = sessionSalon(req);
+      if (!mine) { return send(res, 401, { error: 'Sign in first', signIn: '/admin/login' }); }
+      if (q.salon && q.salon !== mine) { return send(res, 403, { error: 'That is another salon' }); }
+    }
+
     if (route === '/api/admin/summary') {
       if (!q.salon || !q.date) { return send(res, 400, { error: 'salon and date are required' }); }
       var rows = store.listDay(q.salon, q.date);
@@ -436,6 +510,7 @@ var server = http.createServer(async function (req, res) {
       var sbody = await readBody(req);
       var svcRow = catalog.services.filter(function (s) { return s.id === sbody.serviceId; })[0];
       if (!svcRow) { return send(res, 404, { error: 'No such service' }); }
+      if (svcRow.salonId !== sessionSalon(req)) { return send(res, 403, { error: 'That is another salon' }); }
       var price = Math.round(Number(sbody.price));
       var duration = Math.round(Number(sbody.durationMin));
       var buffer = Math.round(Number(sbody.bufferMin));
@@ -455,6 +530,7 @@ var server = http.createServer(async function (req, res) {
       var hbody = await readBody(req);
       var who = catalog.staff.filter(function (s) { return s.id === hbody.staffId; })[0];
       if (!who) { return send(res, 404, { error: 'No such stylist' }); }
+      if (who.salonId !== sessionSalon(req)) { return send(res, 403, { error: 'That is another salon' }); }
       if (!Array.isArray(hbody.week) || hbody.week.length !== 7) { return send(res, 400, { error: 'Send all seven days' }); }
       for (var day of hbody.week) {
         var wd = Math.round(Number(day.weekday));
@@ -543,6 +619,17 @@ var server = http.createServer(async function (req, res) {
     }
 
     if (route.indexOf('/api/') === 0) { return send(res, 404, { error: 'Unknown endpoint' }); }
+
+    /* The front desk page itself is behind the same guard, and the login page is
+       the only thing that is not. */
+    if (route === '/admin/login' || route === '/admin/login.html') {
+      if (sessionSalon(req)) { return redirect(res, '/admin'); }
+      return serveStatic(req, res, '/login.html');
+    }
+    if (route === '/admin' || route === '/admin/' || route === '/admin.html') {
+      if (!sessionSalon(req)) { return redirect(res, '/admin/login'); }
+      return serveStatic(req, res, '/admin.html');
+    }
     return serveStatic(req, res, route);
   } catch (e) {
     console.error(route + ' failed: ' + e.message);
@@ -553,6 +640,7 @@ var server = http.createServer(async function (req, res) {
 seedIfEmpty();
 seedSettings();
 rebuild();
+bootstrapAdmin();
 
 server.listen(PORT, function () {
   console.log('Goldenhue booking server on http://localhost:' + PORT);

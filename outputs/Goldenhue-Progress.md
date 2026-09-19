@@ -38,6 +38,13 @@ index.html?salon=cuttingroom&service=cr-cut&staff=arjun&day=1&step=3
 
 ## Hosting it without your laptop
 
+**The front desk now needs a password.** Set `ADMIN_PASSWORD` (and optionally
+`ADMIN_EMAIL`) before the first boot of a deployment and the first login is created
+for each salon; after that the variable is ignored. Passwords are hashed with
+scrypt and sessions are signed cookies, both from Node's own crypto, so there is
+still nothing to install. Without the variable the front desk stays locked and the
+server says so on boot rather than inventing a default password.
+
 Short answer: **you do not need Firebase.** GitHub Pages hosts the customer page
 today, for nothing, but it is static, so it cannot take a booking. Taking bookings
 needs somewhere running `server.js`, and that somewhere needs a disk because the

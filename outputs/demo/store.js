@@ -91,7 +91,46 @@ function createStore(file) {
         end_min   INTEGER NOT NULL,
         PRIMARY KEY (staff_id, weekday, start_min)
       );
+      /* Small key/value corner: the session secret lives here so that restarting
+         the server does not sign everyone out. */
+      CREATE TABLE IF NOT EXISTS app_setting (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS admin_user (
+        salon_id      TEXT NOT NULL,
+        email         TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        salt          TEXT NOT NULL,
+        created_at    TEXT NOT NULL,
+        PRIMARY KEY (salon_id, email)
+      );
     `);
+  };
+
+  /* ---------- small settings, and the people who may change them ---------- */
+
+  q.getSetting = function (key) {
+    var row = db.prepare('SELECT value FROM app_setting WHERE key = ?').get(key);
+    return row ? row.value : null;
+  };
+
+  q.setSetting = function (key, value) {
+    db.prepare('INSERT INTO app_setting (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(key, value);
+  };
+
+  q.countAdmins = function (salonId) {
+    return db.prepare('SELECT COUNT(*) AS n FROM admin_user WHERE salon_id = ?').get(salonId).n;
+  };
+
+  q.createAdmin = function (row) {
+    db.prepare('INSERT OR IGNORE INTO admin_user (salon_id, email, password_hash, salt, created_at) VALUES (?,?,?,?,?)')
+      .run(row.salonId, row.email, row.passwordHash, row.salt, new Date().toISOString());
+  };
+
+  q.findAdmin = function (salonId, email) {
+    return db.prepare('SELECT * FROM admin_user WHERE salon_id = ? AND email = ?').get(salonId, email) || null;
   };
 
   /* ---------- bookings ---------- */

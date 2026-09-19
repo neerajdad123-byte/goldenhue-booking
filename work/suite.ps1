@@ -22,6 +22,7 @@ Write-Host "   data.js engine.js app.js all parse"
 
 $cdp = $env:GOLDENHUE_CDP
 if ($cdp) {
+  if (-not $env:ADMIN_PASSWORD) { $env:ADMIN_PASSWORD = 'devpassword123' }
   Write-Host "== page, in a real browser"
   node work/errors.js $cdp | Select-Object -First 1
   $flown = node work/flow.js $cdp | Select-Object -Last 1

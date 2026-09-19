@@ -45,6 +45,9 @@ function onceOrTimeout(ws, event, ms) {
   await rpc(ws, st, 'Runtime.enable');
   await rpc(ws, st, 'Network.enable');
   await rpc(ws, st, 'Network.setCacheDisabled', { cacheDisabled: true });
+  /* Start with no session. Otherwise a cookie left over from the last run makes
+     the browser look signed in, and "the guard works" would be untested. */
+  await rpc(ws, st, 'Network.clearBrowserCookies');
   await rpc(ws, st, 'Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
 
   async function go(url) {
@@ -64,8 +67,28 @@ function onceOrTimeout(ws, event, ms) {
   }
 
   console.log('the front desk loads');
+  /* The front desk is behind a session, so walk in the front door: the login page
+     sets the cookie in this browser, exactly as it would for the salon owner. */
+  await go(BASE + 'admin/login');
   await go(BASE + 'admin');
-  check('the page is the front desk', (await ev('document.querySelector(".admin-title").textContent.length')) > 2);
+  var landedOn = await ev('location.pathname');
+  check('an anonymous visit to the front desk is redirected to sign in', landedOn === '/admin/login', landedOn);
+  check('an unauthenticated visit lands on the sign-in page',
+    (await ev('!!document.getElementById("signinForm")')) === true);
+  /* Submit without awaiting the promise: signing in navigates, and a navigation
+     during evaluation tears down the call. Wait on this side instead. */
+  await ev('(() => { document.getElementById("fSalon").value = "goldenhue"; document.getElementById("fEmail").value = ' +
+    JSON.stringify(process.env.ADMIN_EMAIL || 'owner@goldenhue.local') + '; document.getElementById("fPassword").value = ' +
+    JSON.stringify(process.env.ADMIN_PASSWORD || 'devpassword123') + '; document.getElementById("signinForm").requestSubmit(); return "sent"; })()');
+  await new Promise(function (r) { setTimeout(r, 1800); });
+  check('signing in reaches the front desk', (await ev('!!document.getElementById("lanes")')) === true,
+    await ev('location.pathname'));
+  check('a wrong password is refused', (await ev('(async () => { const r = await fetch("/api/admin/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ salonId: "goldenhue", email: "owner@goldenhue.local", password: "definitely-wrong" }) }); return r.status; })()')) === 401);
+
+  await go(BASE + 'admin');
+  /* the sign-in page also has an .admin-title, so ask for something only the front
+     desk has */
+  check('the page is the front desk', (await ev('!!document.getElementById("lanes")')) === true);
   check('its own stylesheet arrived', (await ev('getComputedStyle(document.querySelector(".admin-head")).borderBottomStyle')) === 'solid');
   check('no page errors', (await ev('window.__adminErrs ? window.__adminErrs.length : 0')) === 0);
   check('the mode badge says Live', (await ev('document.getElementById("liveBadge").textContent')) === 'Live');

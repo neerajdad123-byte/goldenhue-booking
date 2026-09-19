@@ -14,6 +14,15 @@ The salon's own console is at http://localhost:3000/admin: the day by stylist,
 editable prices and durations, and each stylist's working week. Change anything
 there and the booking page follows immediately.
 
+It is behind a password. Set one the first time you start it:
+
+    ADMIN_PASSWORD=something-long ADMIN_EMAIL=you@salon.com node server.js
+
+That creates the first login for every salon in the catalogue, and the variable is
+ignored on later boots — change it from the database or delete
+`goldenhue.db` to start over. Without it the front desk stays locked and says why.
+Customers never see any of this: booking stays open to everyone.
+
 The same folder also works as a plain static page. Opened straight from disk it
 runs in preview mode: everything behaves the same, but bookings stay in the tab.
 The badge in the header says which mode you are in.

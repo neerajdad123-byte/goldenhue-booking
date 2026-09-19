@@ -21,6 +21,12 @@
 
   async function api(path, options) {
     var r = await fetch(path, options);
+    /* The session can expire while the page is open. Send them to sign in rather
+       than leaving a front desk that silently cannot save anything. */
+    if (r.status === 401 && String(path).indexOf('admin') >= 0 && String(path).indexOf('login') < 0) {
+      window.location.replace('/admin/login');
+      throw new Error('signed out');
+    }
     var body = await r.json().catch(function () { return {}; });
     return { status: r.status, body: body };
   }
@@ -52,7 +58,7 @@
   }
 
   async function loadDay() {
-    var res = await api('api/admin/summary?salon=' + encodeURIComponent(ui.salonId) + '&date=' + ui.date);
+    var res = await api('/api/admin/summary?salon=' + encodeURIComponent(ui.salonId) + '&date=' + ui.date);
     if (res.status !== 200) { toast(res.body.error || 'Could not load the day.', 'error'); return; }
     state = res.body;
     renderDay();
@@ -105,7 +111,7 @@
   /* ---------- services ---------- */
 
   async function loadConfig() {
-    var res = await api('api/admin/config?salon=' + encodeURIComponent(ui.salonId));
+    var res = await api('/api/admin/config?salon=' + encodeURIComponent(ui.salonId));
     if (res.status !== 200) { return; }
     config = res.body;
     renderServices();
@@ -141,7 +147,7 @@
     };
     var btn = row.querySelector('[data-save]');
     btn.disabled = true;
-    var res = await api('api/admin/service', {
+    var res = await api('/api/admin/service', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload)
     });
     btn.disabled = false;
@@ -215,7 +221,7 @@
     }
     var btn = person.querySelector('[data-savehours]');
     btn.disabled = true;
-    var res = await api('api/admin/hours', {
+    var res = await api('/api/admin/hours', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ staffId: staffId, week: week })
     });
@@ -264,7 +270,7 @@
   function connectStream() {
     if (typeof EventSource === 'undefined') { return; }
     if (ui.stream) { ui.stream.close(); ui.stream = null; }
-    var es = new EventSource('api/stream?salon=' + encodeURIComponent(ui.salonId));
+    var es = new EventSource('/api/stream?salon=' + encodeURIComponent(ui.salonId));
     ui.stream = es;
     es.onopen = function () { el('liveBadge').hidden = false; el('liveBadge').textContent = 'Live'; el('liveBadge').classList.remove('off'); };
     es.onmessage = function (event) {
@@ -286,7 +292,11 @@
   }
 
   async function boot() {
-    var cat = await api('api/catalog');
+    el('signOut').addEventListener('click', function () {
+      fetch('/api/admin/logout', { method: 'POST' }).then(function () { window.location.replace('/admin/login'); });
+    });
+
+    var cat = await api('/api/catalog');
     if (cat.status !== 200 || !cat.body.salons || !cat.body.salons.length) {
       document.body.innerHTML = '<div class="empty" style="margin:40px auto;max-width:520px">' +
         '<strong>The front desk needs the server</strong>' +

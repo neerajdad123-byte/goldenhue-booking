@@ -189,6 +189,57 @@ async function post(p, body) {
     updates.every(function (u) { return u.type === 'hello' || !spot || u.staffId === spot.staffId; }), JSON.stringify(updates));
 
   console.log('input the server must not trust');
+  /* The front desk is the only thing that writes, so it is the only thing that
+     needs a session. These checks are the difference between "sign in" and
+     "anyone on the internet can change the prices". */
+  var noCookie = await get('/api/admin/summary', { salon: 'goldenhue', date: upcoming });
+  check('the day summary refuses an anonymous caller', noCookie.status === 401, String(noCookie.status));
+  var noCookieConfig = await get('/api/admin/config', { salon: 'goldenhue' });
+  check('the settings refuse an anonymous caller', noCookieConfig.status === 401, String(noCookieConfig.status));
+  var noCookieWrite = await post('/api/admin/service', { serviceId: 'gh-haircut', price: 1, durationMin: 45, bufferMin: 10 });
+  check('an anonymous write is refused', noCookieWrite.status === 401, String(noCookieWrite.status));
+
+  var wrongPass = await post('/api/admin/login', { salonId: 'goldenhue', email: 'owner@goldenhue.local', password: 'not-the-password' });
+  check('a wrong password is refused', wrongPass.status === 401, String(wrongPass.status));
+  var wrongSalon = await post('/api/admin/login', { salonId: 'nope', email: 'owner@goldenhue.local', password: 'not-the-password' });
+  check('signing in to an unknown salon is refused', wrongSalon.status === 401, String(wrongSalon.status));
+  var noPassword = await post('/api/admin/login', { salonId: 'goldenhue', email: 'owner@goldenhue.local' });
+  check('signing in with no password is refused', noPassword.status === 401, String(noPassword.status));
+
+  /* A tampered cookie must not pass. The signature covers the salon and the expiry,
+     so changing either has to break it. */
+  var goodLogin = await fetch(BASE + '/api/admin/login', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      salonId: 'goldenhue',
+      email: process.env.ADMIN_EMAIL || 'owner@goldenhue.local',
+      password: process.env.ADMIN_PASSWORD || 'devpassword123'
+    })
+  });
+  check('the right password signs in', goodLogin.status === 200, String(goodLogin.status));
+  var cookie = (goodLogin.headers.get('set-cookie') || '').split(';')[0];
+  check('signing in hands back a session cookie', cookie.indexOf('gh_session=') === 0, cookie.slice(0, 24));
+  check('the cookie is not readable by scripts', (goodLogin.headers.get('set-cookie') || '').indexOf('HttpOnly') > 0);
+  check('the cookie is not sent cross-site', (goodLogin.headers.get('set-cookie') || '').indexOf('SameSite=Lax') > 0);
+
+  var withCookie = await fetch(BASE + '/api/admin/config?salon=goldenhue', { headers: { cookie: cookie } });
+  check('that cookie opens the settings', withCookie.status === 200, String(withCookie.status));
+
+  var tampered = cookie.slice(0, -3) + 'aaa';
+  var withTampered = await fetch(BASE + '/api/admin/config?salon=goldenhue', { headers: { cookie: tampered } });
+  check('a tampered cookie is refused', withTampered.status === 401, String(withTampered.status));
+
+  /* Swapping the salon into someone else's session must not work. */
+  var otherSalon = await fetch(BASE + '/api/admin/config?salon=blushbloom', { headers: { cookie: cookie } });
+  check('a session cannot read another salon', otherSalon.status === 403, String(otherSalon.status));
+
+  var forged = 'blushbloom.99999999999999.' + cookie.split('.').slice(2).join('.');
+  var withForged = await fetch(BASE + '/api/admin/config?salon=blushbloom', { headers: { cookie: forged } });
+  check('a forged salon in the cookie is refused', withForged.status === 401, String(withForged.status));
+
+  var logout = await fetch(BASE + '/api/admin/logout', { method: 'POST', headers: { cookie: cookie } });
+  check('signing out works', logout.status === 200, String(logout.status));
+
   var badJson = await fetch(BASE + '/api/book', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{oops' });
   check('malformed json is rejected', badJson.status === 500 || badJson.status === 400, String(badJson.status));
   var noName = await post('/api/book', {
