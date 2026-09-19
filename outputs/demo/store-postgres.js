@@ -32,6 +32,29 @@
 
 var ACTIVE = "('pending','booked','confirmed')";
 
+/* The same connection string, as it was typed, and as it probably should be.
+
+   Pasting a connection string from a rendered markdown message carries its escaping
+   with it: "neondb_owner" arrives as "neondb\_owner" and the password gains a
+   character that makes authentication fail with a message that never mentions it.
+   The repair is offered as a fallback rather than applied silently, so a password
+   that really does contain a backslash still works. */
+function connectionCandidates(raw) {
+  var out = [];
+  var value = String(raw == null ? '' : raw).trim();
+  if (!value) { return out; }
+
+  /* A value wrapped in quotes is a common paste artifact too. */
+  if (/^["'][\s\S]*["']$/.test(value)) { value = value.slice(1, -1).trim(); }
+  out.push(value);
+
+  if (/\\[_@!#*\[\](){}<>.,;:'"+=-]/.test(value)) {
+    out.push(value.replace(/\\([_@!#*\[\](){}<>.,;:'"+=-])/g, '$1'));
+  }
+
+  return out.filter(function (v, i) { return v && out.indexOf(v) === i; });
+}
+
 function toAppointment(r) {
   if (!r) { return null; }
   return {
@@ -54,7 +77,24 @@ function createPostgresStore(url) {
   /* Serverless Postgres closes idle connections, and a salon's booking page is
      idle most of the day. A small pool plus a short idle timeout keeps the first
      request after a quiet spell from failing. */
-  var isLocal = /localhost|127\.0\.0\.1|::1/.test(url);
+  /* Connection strings get pasted from places that escape punctuation: a chat
+     message, an issue, a screenshot's worth of OCR, a docs page. The escaping turns
+     "user_pass" into "user\_pass" and the password fails authentication with a
+     message that never mentions the backslash. Rather than make someone hunt for an
+     invisible character, the candidates are tried in order and the one that works is
+     reported.
+
+     The value is tried exactly as given first, so a password that genuinely contains
+     a backslash still works. */
+  var candidates = connectionCandidates(url);
+
+  /* TLS is decided in this file rather than by the string, so sslmode is removed
+     rather than left to compete with it. That also silences a driver warning about
+     sslmode=require changing meaning in a future version: with one authority over
+     TLS, there is nothing for the string to mean. */
+  function stripSsl(value) {
+    return String(value).replace(/([?&])sslmode=[^&]*/g, '$1').replace(/[?&]+$/, '');
+  }
 
   /* Sizing the pool is sizing for the worst minute, not the average one.
 
@@ -66,27 +106,67 @@ function createPostgresStore(url) {
 
      The pooled connection endpoint these hosts provide is built for this: many
      client connections, multiplexed onto few server ones. So the ceiling is set
-     generously and the wait is long enough for a queue rather than a failure. */
-  var pool = new pg.Pool({
-    connectionString: url,
-    max: Number(process.env.PG_POOL_MAX || 12),
-    idleTimeoutMillis: 20000,
-    connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || 30000),
-    /* A statement that never returns should not hold a connection for ever. */
-    statement_timeout: 15000,
-    query_timeout: 20000,
-    /* Verify the certificate on a managed host. The driver warns that sslmode=require
-       is on its way to meaning "encrypt but do not verify", which is weaker than it
-       sounds and would silently change under us on a future upgrade, so the choice is
-       made here explicitly instead of inherited from the connection string. */
-    ssl: isLocal ? false : { rejectUnauthorized: true }
-  });
+     generously and the wait is long enough for a queue rather than a failure.
 
-  function q(sql, params) {
-    return pool.query(sql, params).then(function (r) { return r.rows; });
+     The pool is created lazily, once a candidate has answered: the first candidate
+     that connects wins, and the losers are closed immediately so a failed attempt
+     does not leak connections. */
+  var pool = null;
+  var chosen = null;
+
+  function makePool(value) {
+    var local = /localhost|127\.0\.0\.1|::1/.test(value);
+    return new pg.Pool({
+      connectionString: stripSsl(value),
+      max: Number(process.env.PG_POOL_MAX || 12),
+      idleTimeoutMillis: 20000,
+      connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || 30000),
+      /* A statement that never returns should not hold a connection for ever. */
+      statement_timeout: 15000,
+      query_timeout: 20000,
+      /* Verify the certificate on a managed host. The driver warns that sslmode=require
+         is on its way to meaning "encrypt but do not verify", which is weaker than it
+         sounds and would silently change under us on a future upgrade, so the choice is
+         made here explicitly instead of inherited from the connection string. */
+      ssl: local ? false : { rejectUnauthorized: true }
+    });
+  }
+
+  async function connect() {
+    if (pool) { return pool; }
+    var lastError = null;
+    for (var i = 0; i < candidates.length; i += 1) {
+      var attempt = makePool(candidates[i]);
+      try {
+        await attempt.query('SELECT 1');
+        pool = attempt;
+        chosen = candidates[i];
+        if (i > 0) {
+          /* Say it plainly, and say what to do. An invisible character should not
+             turn into a hunt. */
+          console.warn('DATABASE_URL connected only after removing escaped punctuation ' +
+            '(backslashes before _, @, ! and similar). It works now, but paste the exact ' +
+            'value from the Neon dashboard into the host to stop relying on that repair.');
+        }
+        return pool;
+      } catch (e) {
+        lastError = e;
+        try { await attempt.end(); } catch (ignored) { /* already gone */ }
+      }
+    }
+    throw lastError || new Error('no usable connection string');
+  }
+
+  async function q(sql, params) {
+    var usable = await connect();
+    var r = await usable.query(sql, params);
+    return r.rows;
   }
 
   var api = {};
+
+  /* The value that actually connected, for diagnostics. */
+  api.connectionString = function () { return chosen; };
 
   api.init = async function () {
     await q(`
@@ -173,7 +253,7 @@ function createPostgresStore(url) {
        Values are bound one row at a time rather than as one big VALUES list: a
        VALUES list arrives as text and Postgres cannot infer the integer columns
        from it, which failed on the first attempt. */
-    var client = await pool.connect();
+    var client = await (await connect()).connect();
     try {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['seed-appointments']);
@@ -239,7 +319,7 @@ function createPostgresStore(url) {
      matches the rest of the system: 10:00-12:00 and 12:00-12:30 do not clash,
      11:59 does. */
   api.bookWithGuard = async function (opts) {
-    var client = await pool.connect();
+    var client = await (await connect()).connect();
     try {
       await client.query('BEGIN');
       for (var staffId of opts.candidates) {
@@ -313,7 +393,7 @@ function createPostgresStore(url) {
   };
 
   api.saveStaffHours = async function (staffId, week) {
-    var client = await pool.connect();
+    var client = await (await connect()).connect();
     try {
       await client.query('BEGIN');
       await client.query('DELETE FROM staff_hours WHERE staff_id = $1', [staffId]);
@@ -379,7 +459,7 @@ function createPostgresStore(url) {
       [passwordHash, salt, salonId, email]);
   };
 
-  api.close = async function () { try { await pool.end(); } catch (e) { /* already closed */ } };
+  api.close = async function () { if (pool) { try { await pool.end(); } catch (e) { /* already closed */ } } };
 
   /* A parameterised query, for diagnostics and for the checks that need to look at
      the database directly rather than through the interface. Parameters are always
@@ -389,4 +469,8 @@ function createPostgresStore(url) {
   return api;
 }
 
-module.exports = { createPostgresStore: createPostgresStore, toAppointment: toAppointment };
+module.exports = {
+  createPostgresStore: createPostgresStore,
+  toAppointment: toAppointment,
+  connectionCandidates: connectionCandidates
+};

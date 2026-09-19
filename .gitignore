@@ -17,6 +17,11 @@ work/chrome-*/
 # must never be nested inside this one.
 work/ghpages*/
 
+# The fresh-checkout simulation: it copies the repository into here to prove a
+# deploy works, and is removed again afterwards. If a run is interrupted it can be
+# left behind, and it is a copy of the repo, so it must never be committed.
+work/deploy-sim/
+
 # Scratch output: logs and captured browser state.
 work/*.log
 work/*.err.log

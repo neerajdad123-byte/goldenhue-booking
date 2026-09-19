@@ -20,6 +20,11 @@ foreach ($f in 'data.js', 'engine.js', 'app.js') {
 }
 Write-Host "   data.js engine.js app.js all parse"
 
+Write-Host "== connection strings survive being pasted"
+$repair = node work/url-repair-test.js | Select-Object -Last 1
+Write-Host "   $repair"
+if ($LASTEXITCODE -ne 0) { $fail = 1 }
+
 $cdp = $env:GOLDENHUE_CDP
 if ($cdp) {
   if (-not $env:ADMIN_PASSWORD) { $env:ADMIN_PASSWORD = 'devpassword123' }

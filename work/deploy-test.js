@@ -89,7 +89,9 @@ function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
     catch (e) { await sleep(500); }
   }
   check('the app boots in a clean checkout against Postgres', up,
-    log.split('\n').filter(function (l) { return l && l.indexOf('Warning') < 0; }).slice(-3).join(' | '));
+    '\n    ' + log.split('\n')
+      .filter(function (l) { return l && l.indexOf('Warning') < 0 && l.indexOf('libpq') < 0; })
+      .slice(-10).join('\n    '));
 
   if (up) {
     var health = await (await fetch('http://127.0.0.1:' + APP_PORT + '/health')).json();

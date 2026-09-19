@@ -19,6 +19,7 @@ var GH = require('./engine.js');
 var DATA = require('./data.js');
 var { createStore } = require('./store.js');
 var { createPostgresStore } = require('./store-postgres.js');
+var { report: reportDbUrl } = require('./db-diagnose.js');
 var { createAuth, readCookie, cookieHeader } = require('./auth.js');
 
 var ROOT = __dirname;
@@ -664,6 +665,13 @@ var server = http.createServer(async function (req, res) {
     await bootstrapAdmin();
   } catch (e) {
     console.error('Could not start: ' + e.message);
+    /* Say what is wrong with the connection string, rather than only that the
+       database said no. The causes of an authentication failure are almost always
+       invisible in the value: a stray backslash from a copied message, a quote, a
+       trailing space, a rotated password, or a string from another project. */
+    if (process.env.DATABASE_URL && /password|authentication|role|database|connect|SSL|timeout/i.test(e.message)) {
+      console.error('\nThe database connection string it was given:\n' + reportDbUrl(process.env.DATABASE_URL));
+    }
     process.exit(1);
   }
 
