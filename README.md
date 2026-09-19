@@ -6,6 +6,8 @@ its day from a front desk behind a password.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/neerajdad123-byte/goldenhue-booking)
 
+Step by step, including what it costs and why: [DEPLOY.md](DEPLOY.md).
+
 ## Run it locally
 
     ADMIN_PASSWORD=your-password node outputs/demo/server.js
