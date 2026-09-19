@@ -2,6 +2,12 @@
 outputs/demo/goldenhue.db
 outputs/demo/goldenhue.db-wal
 outputs/demo/goldenhue.db-shm
+# Any SQLite file anywhere, including the ones the tests create in scratch
+# directories. This has been gotten wrong three times; a glob cannot be dodged by
+# inventing a new test path.
+*.db
+*.db-wal
+*.db-shm
 
 # Browser profiles created by the automated checks. This is hundreds of megabytes
 # of Chrome state and must never enter the repository.
