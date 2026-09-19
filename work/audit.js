@@ -14,7 +14,23 @@ var PATHS = [
 
 var PROBE = `(async () => {
   await document.fonts.ready;
-  await new Promise(r => setTimeout(r, 900));
+  /* Measure the settled page, not one mid-animation. A word rising out of its mask
+     is momentarily offset by most of its own height, which read as "the mask is
+     cutting the text" and produced findings that came and went between runs. */
+  const settle = async () => {
+    const running = document.getAnimations().filter(a => {
+      const timing = a.effect && a.effect.getTiming ? a.effect.getTiming() : {};
+      return timing.iterations !== Infinity;   /* the marquee never finishes, by design */
+    });
+    if (!running.length) { return; }
+    await Promise.race([
+      Promise.all(running.map(a => a.finished.catch(() => {}))),
+      new Promise(r => setTimeout(r, 4000))
+    ]);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  };
+  await settle();
+  await new Promise(r => setTimeout(r, 250));
   const de = document.documentElement;
   const W = window.innerWidth, H = window.innerHeight;
   const out = { w: W, findings: [] };

@@ -46,21 +46,20 @@ a shared secret is generated and stored on first boot.
 
 ## Hosting
 
-`render.yaml` is in the repository, so the button above deploys the whole thing:
-the page, the API, the database on a disk, and a password prompted during setup.
+Free, and no card: **Render** runs the app on its free tier, and **Neon** holds the
+bookings on its free tier. The app is disposable and the database is not, which is
+why this works without paying for a disk. `render.yaml` is in the repository, so
+the button above deploys the whole thing.
 
-It uses a paid instance on purpose. Render's free tier has an "ephemeral
-filesystem" and states that local SQLite databases are "lost every time the
-service redeploys, restarts, or spins down" — and free services spin down after 15
-minutes idle. The database is the product here, so free would wipe every booking
-several times a day.
+Step by step: [DEPLOY.md](DEPLOY.md). The one catch is that Render stops a free
+service after 15 minutes idle, so the first visitor waits about a minute. Nothing
+is lost when that happens, because the bookings are at Neon.
 
-`Dockerfile` is there for anywhere else that runs containers. What matters is a
-persistent volume and `DB_FILE` pointing at it.
-
-Two environment variables are worth knowing: `ADMIN_PASSWORD` sets the front-desk
-password, and changing it later rotates it. `DB_FILE` says where the database
-lives.
+Where the data lives is one environment variable. Unset, the app uses a local
+SQLite file, which is what running it on your own machine does. Set to a Postgres
+connection string, it uses that instead. `ADMIN_PASSWORD` sets the front-desk
+password, and changing it later rotates it. `Dockerfile` is there for anywhere
+else that runs containers.
 
 ## Checking it
 

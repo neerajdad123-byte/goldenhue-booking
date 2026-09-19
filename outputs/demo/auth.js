@@ -35,10 +35,17 @@ function sameSecret(a, b) {
 function createAuth(store) {
   /* The secret is generated once and kept, so a restart does not sign everyone
      out and a second process shares the same secret. */
-  var secret = store.getSetting('session_secret');
-  if (!secret) {
-    secret = crypto.randomBytes(32).toString('hex');
-    store.setSetting('session_secret', secret);
+  var secret = null;
+
+  /* Loaded once at boot rather than on every request: it is a round trip to the
+     database now, and verify() has to stay synchronous because it runs on every
+     single request. */
+  async function init() {
+    secret = await store.getSetting('session_secret');
+    if (!secret) {
+      secret = crypto.randomBytes(32).toString('hex');
+      await store.setSetting('session_secret', secret);
+    }
   }
 
   function sign(payload) {
@@ -65,19 +72,19 @@ function createAuth(store) {
 
   /* Create the first account for a salon. Returns false when one already exists,
      so this is safe to call on every boot. */
-  function ensureAdmin(salonId, email, password) {
-    if (store.countAdmins(salonId) > 0) { return false; }
+  async function ensureAdmin(salonId, email, password) {
+    if (await store.countAdmins(salonId) > 0) { return false; }
     if (!email || !password || String(password).length < 8) { return false; }
     var salt = newSalt();
-    store.createAdmin({
+    await store.createAdmin({
       salonId: salonId, email: String(email).toLowerCase().trim(),
       passwordHash: hashPassword(password, salt), salt: salt
     });
     return true;
   }
 
-  function checkLogin(salonId, email, password) {
-    var row = store.findAdmin(salonId, String(email || '').toLowerCase().trim());
+  async function checkLogin(salonId, email, password) {
+    var row = await store.findAdmin(salonId, String(email || '').toLowerCase().trim());
     if (!row) {
       /* Hash anyway, so a missing account and a wrong password take similar time. */
       hashPassword(String(password || ''), 'decoy-salt-value');
@@ -90,17 +97,17 @@ function createAuth(store) {
      password can be rotated by changing it and redeploying. Without this, a
      forgotten password would mean losing the database or editing it by hand,
      and neither is something to ask of a salon. */
-  function syncAdminPassword(salonId, email, password) {
-    var row = store.findAdmin(salonId, String(email).toLowerCase().trim());
-    if (!row) { return ensureAdmin(salonId, email, password); }
+  async function syncAdminPassword(salonId, email, password) {
+    var row = await store.findAdmin(salonId, String(email).toLowerCase().trim());
+    if (!row) { return await ensureAdmin(salonId, email, password); }
     if (sameSecret(hashPassword(String(password), row.salt), row.password_hash)) { return false; }
     var salt = newSalt();
-    store.updateAdminPassword(salonId, row.email, hashPassword(String(password), salt), salt);
+    await store.updateAdminPassword(salonId, row.email, hashPassword(String(password), salt), salt);
     return true;
   }
 
   return {
-    issue: issue, verify: verify, ensureAdmin: ensureAdmin,
+    init: init, issue: issue, verify: verify, ensureAdmin: ensureAdmin,
     checkLogin: checkLogin, syncAdminPassword: syncAdminPassword
   };
 }

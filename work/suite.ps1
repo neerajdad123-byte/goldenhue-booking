@@ -73,9 +73,17 @@ if ($api) {
   if ($cdp) {
     Write-Host "== design audit"
     $auditUrl = if ($env:GOLDENHUE_AUDIT_URL) { $env:GOLDENHUE_AUDIT_URL } else { "$api/" }
-    $audit = node work/audit.js $cdp $auditUrl | Select-Object -Last 1
+    # Keep the detail, not just the count: a failure with no findings listed is a
+    # puzzle for whoever reads this next.
+    node work/audit.js $cdp $auditUrl > work/audit-last.log 2>&1
+    $audit = Get-Content work/audit-last.log | Select-Object -Last 1
     Write-Host "   $audit"
-    if ($audit -notmatch '^0 findings') { $fail = 1 }
+    if ($audit -notmatch '^0 findings') {
+      $fail = 1
+      Write-Host "   full report: work/audit-last.log"
+      Get-Content work/audit-last.log | Where-Object { $_ -notmatch 'clean$' -and $_.Trim() -ne '' } |
+        Select-Object -First 8 | ForEach-Object { Write-Host "   $_" }
+    }
   }
 
   if ($cdp) {

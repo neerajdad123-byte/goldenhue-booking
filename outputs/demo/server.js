@@ -4,7 +4,7 @@
    folder it sits in is still a working static page; when this server is running,
    the same page talks to it and the bookings become real.
 
-   The one decision that matters is in createBooking(): the overlap check and the
+   The one decision that matters is in await createBooking(): the overlap check and the
    insert happen inside a single IMMEDIATE transaction, so two customers clicking
    the same slot cannot both succeed. That is the database doing the work, not the
    application, which is why it holds under concurrent requests.
@@ -18,6 +18,7 @@ var path = require('path');
 var GH = require('./engine.js');
 var DATA = require('./data.js');
 var { createStore } = require('./store.js');
+var { createPostgresStore } = require('./store-postgres.js');
 var { createAuth, readCookie, cookieHeader } = require('./auth.js');
 
 var ROOT = __dirname;
@@ -35,8 +36,13 @@ var catalog = JSON.parse(JSON.stringify({
 }));
 var state = GH.createState(catalog);
 
-var store = createStore(DB_FILE);
-store.init();
+/* One environment variable decides where the bookings live. Unset, it is a local
+   SQLite file, which is what running it on your own machine uses. Set, it is a
+   managed Postgres, which is what a deployment uses, because a free host has no
+   disk to keep a file on. The server does not know the difference. */
+var store = process.env.DATABASE_URL
+  ? createPostgresStore(process.env.DATABASE_URL)
+  : createStore(DB_FILE);
 
 var auth = createAuth(store);
 
@@ -45,22 +51,26 @@ var auth = createAuth(store);
    ADMIN_EMAIL) before the first boot of a deployment. */
 var SESSION_COOKIE = 'gh_session';
 var SESSION_DAYS = 30;
-function bootstrapAdmin() {
+async function bootstrapAdmin() {
   var email = process.env.ADMIN_EMAIL || 'owner@goldenhue.local';
   var password = process.env.ADMIN_PASSWORD;
   var created = [], updated = [];
   for (var s of catalog.salons) {
     if (!password) { continue; }
-    if (store.countAdmins(s.id) === 0) {
-      if (auth.ensureAdmin(s.id, email, password)) { created.push(s.id); }
-    } else if (auth.syncAdminPassword(s.id, email, password)) {
+    if (await store.countAdmins(s.id) === 0) {
+      if (await auth.ensureAdmin(s.id, email, password)) { created.push(s.id); }
+    } else if (await auth.syncAdminPassword(s.id, email, password)) {
       updated.push(s.id);
     }
   }
   if (created.length) { console.log('created front-desk login for: ' + created.join(', ') + ' as ' + email); }
   if (updated.length) { console.log('front-desk password updated from ADMIN_PASSWORD for: ' + updated.join(', ')); }
   if (!created.length && !updated.length) {
-    var missing = catalog.salons.filter(function (s) { return store.countAdmins(s.id) === 0; });
+    /* a loop rather than filter(): awaiting inside a filter callback is not allowed */
+    var missing = [];
+    for (var c of catalog.salons) {
+      if (await store.countAdmins(c.id) === 0) { missing.push(c); }
+    }
     if (missing.length) {
       console.warn('no front-desk login for: ' + missing.map(function (s) { return s.id; }).join(', ') +
         ' — set ADMIN_PASSWORD before the first boot to create one');
@@ -68,16 +78,16 @@ function bootstrapAdmin() {
   }
 }
 
-function seedSettings() {
-  store.seedServiceSettings(catalog.services);
-  store.seedStaffHours(catalog.staff, GH.parseWindows);
+async function seedSettings() {
+  await store.seedServiceSettings(catalog.services);
+  await store.seedStaffHours(catalog.staff, GH.parseWindows);
 }
 
 function hm(mins) { return GH.hmOfMinutes(mins); }
 
 /* Put the salon's saved settings back onto the raw catalogue. */
-function applySettings() {
-  var byId = store.serviceSettings();
+async function applySettings() {
+  var byId = await store.serviceSettings();
   catalog.services.forEach(function (s) {
     var r = byId[s.id];
     if (!r) { return; }
@@ -87,7 +97,7 @@ function applySettings() {
     s.active = !!r.active;
   });
 
-  var saved = store.staffHours();
+  var saved = await store.staffHours();
   var hours = {};
   Object.keys(saved).forEach(function (staffId) {
     hours[staffId] = {};
@@ -106,27 +116,27 @@ function applySettings() {
   });
 }
 
-function rebuild() {
-  applySettings();
+async function rebuild() {
+  await applySettings();
   state = GH.createState(catalog);
-  loadAppointments();
+  await loadAppointments();
 }
 
 /* ---------- mirror the store into the engine's shape ---------- */
 
 function salonById(id) { return state.salons.filter(function (s) { return s.id === id; })[0]; }
 
-function loadAppointments() {
+async function loadAppointments() {
   /* A day either side of today, because the salons in one deployment can sit in
      different timezones and this query has no single "today" to use. */
-  state.appointments = store.listActive(GH.addDays(GH.todayYmd(), -1));
+  state.appointments = await store.listActive(GH.addDays(GH.todayYmd(), -1));
 }
 
 /* ---------- seeding ---------- */
 
-function seedIfEmpty() {
+async function seedIfEmpty() {
   var seeded = GH.createState(DATA).appointments;
-  var wrote = store.seedIfEmpty(seeded.map(function (a) {
+  var wrote = await store.seedIfEmpty(seeded.map(function (a) {
     return {
       id: a.id, ref: a.ref, salonId: a.salonId, staffId: a.staffId, serviceId: a.serviceId,
       customerName: a.customerName, note: 'Seeded example booking',
@@ -146,7 +156,7 @@ function makeRef() {
   return 'GH-' + out;
 }
 
-function createBooking(input) {
+async function createBooking(input) {
   var salon = GH.getSalon(state, input.salonId);
   var svc = GH.getService(state, input.serviceId);
   if (!salon || !svc) { return { status: 400, body: { error: 'Unknown salon or service' } }; }
@@ -182,7 +192,7 @@ function createBooking(input) {
   if (!free.length) { return { status: 409, body: { error: 'Slot taken', message: GH.SLOT_TAKEN_MESSAGE } }; }
 
   var endAt = new Date(start.getTime() + (endMin - startMin) * 60000);
-  var out = store.bookWithGuard({
+  var out = await store.bookWithGuard({
     salonId: salon.id, day: day, startMin: startMin, endMin: endMin,
     candidates: free.map(function (s) { return s.id; }),
     make: function (staffId) {
@@ -228,8 +238,8 @@ function fitsShift(staff, salon, day, startMin, endMin) {
   return true;
 }
 
-function cancelBooking(ref) {
-  var out = store.cancel(ref);
+async function cancelBooking(ref) {
+  var out = await store.cancel(ref);
   if (!out.ok) { return { status: 404, body: { error: 'No such booking' } }; }
   var row = out.appointment;
   state.appointments = state.appointments.filter(function (a) { return a.ref !== ref; });
@@ -287,12 +297,12 @@ function publicConfig() {
    process and wrong for two: a booking taken by the other instance would still be
    offered here, and the customer would be refused at the last step. One indexed
    read per request is a cheap price for never disagreeing with the database. */
-function freshBookings() {
-  loadAppointments();
+async function freshBookings() {
+  await loadAppointments();
 }
 
-function availability(query) {
-  freshBookings();
+async function availability(query) {
+  await freshBookings();
   return GH.availableSlots(state, {
     salonId: query.salon, serviceId: query.service,
     staffId: query.staff && query.staff !== 'any' ? query.staff : null,
@@ -300,8 +310,8 @@ function availability(query) {
   });
 }
 
-function diary(query) {
-  freshBookings();
+async function diary(query) {
+  await freshBookings();
   return GH.diaryLanes(state, {
     salonId: query.salon, serviceId: query.service,
     staffId: query.staff && query.staff !== 'any' ? query.staff : null,
@@ -310,8 +320,8 @@ function diary(query) {
 }
 
 /* The soonest each stylist could take this service, for the per-stylist view. */
-function staffAvailability(query) {
-  freshBookings();
+async function staffAvailability(query) {
+  await freshBookings();
   var staff = GH.eligibleStaff(state, query.salon, query.service);
   return staff.map(function (s) {
     var got = GH.earliestSlot(state, {
@@ -427,7 +437,7 @@ var server = http.createServer(async function (req, res) {
     if (route === '/api/admin/login' && req.method === 'POST') {
       var lbody = await readBody(req);
       var salonId = String(lbody.salonId || '');
-      var person = GH.getSalon(state, salonId) ? auth.checkLogin(salonId, lbody.email, lbody.password) : null;
+      var person = GH.getSalon(state, salonId) ? await auth.checkLogin(salonId, lbody.email, lbody.password) : null;
       if (!person) {
         /* Deliberately the same answer whether the account exists or the password
            is wrong: telling them apart is a free hint for anyone guessing. */
@@ -459,7 +469,7 @@ var server = http.createServer(async function (req, res) {
 
     if (route === '/api/admin/summary') {
       if (!q.salon || !q.date) { return send(res, 400, { error: 'salon and date are required' }); }
-      var rows = store.listDay(q.salon, q.date);
+      var rows = await store.listDay(q.salon, q.date);
       var dayStaff = GH.staffForSalon(state, q.salon);
       var lanes = dayStaff.map(function (st) {
         var windows = GH.staffWindows(st, salonById(q.salon), q.date);
@@ -481,8 +491,8 @@ var server = http.createServer(async function (req, res) {
 
     if (route === '/api/admin/config') {
       if (!q.salon) { return send(res, 400, { error: 'salon is required' }); }
-      var mine = store.serviceSettings();
-      var allHours = store.staffHours();
+      var mine = await store.serviceSettings();
+      var allHours = await store.staffHours();
       return send(res, 200, {
         salonId: q.salon,
         dayNames: GH.DAY_NAMES,
@@ -521,11 +531,11 @@ var server = http.createServer(async function (req, res) {
       if (!isFinite(price) || price < 0 || price > 100000000) { return send(res, 400, { error: 'Price must be a whole number of paise, up to 10 lakh' }); }
       if (!isFinite(duration) || duration < 5 || duration > 600) { return send(res, 400, { error: 'Duration must be between 5 and 600 minutes' }); }
       if (!isFinite(buffer) || buffer < 0 || buffer > 120) { return send(res, 400, { error: 'Turnaround must be between 0 and 120 minutes' }); }
-      store.saveServiceSetting({
+      await store.saveServiceSetting({
         serviceId: svcRow.id, price: price, durationMin: duration,
         bufferMin: buffer, active: sbody.active !== false
       });
-      rebuild();
+      await rebuild();
       broadcast(svcRow.salonId, { type: 'settings', serviceId: svcRow.id });
       return send(res, 200, { ok: true, serviceId: svcRow.id, price: price, durationMin: duration, bufferMin: buffer });
     }
@@ -545,8 +555,8 @@ var server = http.createServer(async function (req, res) {
           return send(res, 400, { error: 'Each working day needs a start and an end at least 15 minutes apart' });
         }
       }
-      store.saveStaffHours(who.id, hbody.week);
-      rebuild();
+      await store.saveStaffHours(who.id, hbody.week);
+      await rebuild();
       broadcast(who.salonId, { type: 'settings', staffId: who.id });
       return send(res, 200, { ok: true, staffId: who.id });
     }
@@ -556,42 +566,42 @@ var server = http.createServer(async function (req, res) {
     if (route === '/api/appointments-range') {
       if (!q.salon || !q.from || !q.to) { return send(res, 400, { error: 'salon, from and to are required' }); }
       return send(res, 200, {
-        from: q.from, to: q.to, appointments: store.listRange(q.salon, q.from, q.to),
+        from: q.from, to: q.to, appointments: await store.listRange(q.salon, q.from, q.to),
         serverNow: new Date().toISOString()
       });
     }
 
     if (route === '/api/availability') {
       if (!q.salon || !q.service || !q.date) { return send(res, 400, { error: 'salon, service and date are required' }); }
-      var av = availability(q);
+      var av = await availability(q);
       return send(res, 200, { date: q.date, staffId: q.staff || null, slots: av.slots, reason: av.reason, closedReason: av.closedReason, serverNow: new Date().toISOString() });
     }
 
     if (route === '/api/diary') {
       if (!q.salon || !q.service || !q.date) { return send(res, 400, { error: 'salon, service and date are required' }); }
-      return send(res, 200, { date: q.date, lanes: diary(q), serverNow: new Date().toISOString() });
+      return send(res, 200, { date: q.date, lanes: await diary(q), serverNow: new Date().toISOString() });
     }
 
     if (route === '/api/staff-availability') {
       if (!q.salon || !q.service) { return send(res, 400, { error: 'salon and service are required' }); }
-      return send(res, 200, { staff: staffAvailability(q) });
+      return send(res, 200, { staff: await staffAvailability(q) });
     }
 
     if (route === '/api/book' && req.method === 'POST') {
       var body = await readBody(req);
-      var out = createBooking(body);
+      var out = await createBooking(body);
       return send(res, out.status, out.body);
     }
 
     if (route === '/api/cancel' && req.method === 'POST') {
       var cbody = await readBody(req);
-      var cout = cancelBooking(String(cbody.ref || ''));
+      var cout = await cancelBooking(String(cbody.ref || ''));
       return send(res, cout.status, cout.body);
     }
 
     if (route === '/api/appointments') {
       if (!q.salon || !q.date) { return send(res, 400, { error: 'salon and date are required' }); }
-      return send(res, 200, { date: q.date, appointments: store.listDay(q.salon, q.date) });
+      return send(res, 200, { date: q.date, appointments: await store.listDay(q.salon, q.date) });
     }
 
     if (route === '/api/stream') {
@@ -619,7 +629,7 @@ var server = http.createServer(async function (req, res) {
     }
 
     if (route === '/health') {
-      return send(res, 200, { ok: true, appointments: store.countAppointments(), now: new Date().toISOString() });
+      return send(res, 200, { ok: true, appointments: await store.countAppointments(), now: new Date().toISOString() });
     }
 
     if (route.indexOf('/api/') === 0) { return send(res, 404, { error: 'Unknown endpoint' }); }
@@ -641,12 +651,25 @@ var server = http.createServer(async function (req, res) {
   }
 });
 
-seedIfEmpty();
-seedSettings();
-rebuild();
-bootstrapAdmin();
+/* Booting is async now: creating tables and seeding are round trips when the
+   database is somewhere else. The server only starts listening once the data is
+   ready, so it never accepts a request it cannot answer. */
+(async function start() {
+  try {
+    await store.init();
+    await auth.init();
+    await seedIfEmpty();
+    await seedSettings();
+    await rebuild();
+    await bootstrapAdmin();
+  } catch (e) {
+    console.error('Could not start: ' + e.message);
+    process.exit(1);
+  }
 
-server.listen(PORT, function () {
-  console.log('Goldenhue booking server on http://localhost:' + PORT);
-  console.log('database: ' + DB_FILE + '  (' + state.appointments.length + ' live appointments)');
-});
+  server.listen(PORT, function () {
+    console.log('Goldenhue booking server on http://localhost:' + PORT);
+    console.log('bookings: ' + (process.env.DATABASE_URL ? 'managed Postgres' : DB_FILE) +
+      '  (' + state.appointments.length + ' live appointments)');
+  });
+}());

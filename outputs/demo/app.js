@@ -614,6 +614,7 @@
       var title = 'No times left', note = 'Every gap on this day is taken or outside working hours.';
       if (res.closedReason) { title = 'Closed'; note = res.closedReason; }
       else if (res.reason === 'FULLY_BOOKED') { title = 'Booked out'; note = 'Try another day, or someone else.'; }
+      else if (res.reason === 'DAY_OFF') { title = 'Nobody is in'; note = 'No stylist who does this is working that day. Try another date.'; }
       else if (res.reason === 'NO_STAFF') { title = 'Nobody can take this'; note = 'Assign this service to a stylist first.'; }
       area.innerHTML = emptyHTML(title, note);
       return;

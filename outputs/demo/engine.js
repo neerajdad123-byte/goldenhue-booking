@@ -285,10 +285,12 @@ var GH = (function () {
     if (!candidates.length) { result.reason = 'NO_STAFF'; return result; }
 
     var byStart = {}, order = [];
+    var working = 0;
     candidates.forEach(function (st) {
       if (!st) { return; }
       var windows = staffWindows(st, salon, day);
       if (!windows.length) { return; }
+      working += 1;
       var busy = activeOn(state, st.id, day).map(function (a) {
         return { s: a.startsAt.getTime(), e: a.bufferUntil.getTime() };
       });
@@ -311,7 +313,11 @@ var GH = (function () {
 
     order.sort(function (a, b) { return a - b; });
     order.forEach(function (t) { result.slots.push(byStart[t]); });
-    if (!result.slots.length && !result.closedReason) { result.reason = 'FULLY_BOOKED'; }
+    /* "Booked out" and "nobody works that day" are different problems for the
+       customer: one is worth trying another stylist, the other another date. */
+    if (!result.slots.length && !result.closedReason) {
+      result.reason = working ? 'FULLY_BOOKED' : 'DAY_OFF';
+    }
     return result;
   }
 
