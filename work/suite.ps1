@@ -83,6 +83,11 @@ if ($api) {
     Write-Host "   $admin"
     if ($LASTEXITCODE -ne 0) { $fail = 1 }
   }
+
+  Write-Host "== two servers, one database"
+  $race = node work/race-test.js | Select-Object -Last 1
+  Write-Host "   $race"
+  if ($LASTEXITCODE -ne 0) { $fail = 1 }
 } else {
   Write-Host "== API checks skipped (set GOLDENHUE_API, for example http://localhost:3000)"
 }

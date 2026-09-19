@@ -158,6 +158,55 @@ check('nothing is offered past the booking horizon', function () {
 });
 
 console.log('display helpers');
+check('the rail and the slot list agree on what is bookable', function () {
+  /* The rail draws bars from diaryLanes and the soonest button reads
+     availableSlots. If those two ever disagree, the page offers a time that the
+     rest of the system will refuse, and "next free" points at a different minute
+     than the bar the customer is looking at. Checked across a fortnight and every
+     service, so an off-grid turnaround cannot slip through. */
+  var probe = GH.createState(DATA);
+  var checked = 0;
+  ['goldenhue', 'blushbloom', 'cuttingroom'].forEach(function (salonId) {
+    GH.servicesForSalon(probe, salonId).forEach(function (svc) {
+      var need = svc.durationMin + svc.bufferMin;
+      GH.eligibleStaff(probe, salonId, svc.id).forEach(function (st) {
+        for (var d = 0; d < 14; d += 1) {
+          var day = GH.addDays(GH.todayYmd(), d);
+          var lanes = GH.diaryLanes(probe, { salonId: salonId, serviceId: svc.id, staffId: st.id, dateISO: day });
+          if (!lanes.length) { continue; }
+          var offered = {};
+          GH.availableSlots(probe, { salonId: salonId, serviceId: svc.id, staffId: st.id, dateISO: day })
+            .slots.forEach(function (s) { offered[s.startMin] = 1; });
+          lanes[0].free.forEach(function (f) {
+            if (f.end - f.start < need) { return; }
+            checked += 1;
+            assert.ok(offered[f.start],
+              salonId + '/' + svc.id + '/' + st.id + ' on ' + day + ': the rail shows ' +
+              GH.clockLabel(f.start) + ' but the slot list does not offer it');
+          });
+        }
+      });
+    });
+  });
+  assert.ok(checked > 100, 'expected plenty of bars to compare, saw ' + checked);
+});
+check('rail bars land on the slot grid', function () {
+  var probe = GH.createState(DATA);
+  ['goldenhue', 'cuttingroom'].forEach(function (salonId) {
+    var salon = GH.getSalon(probe, salonId);
+    var svc = GH.servicesForSalon(probe, salonId)[0];
+    for (var d = 0; d < 10; d += 1) {
+      var day = GH.addDays(GH.todayYmd(), d);
+      GH.diaryLanes(probe, { salonId: salonId, serviceId: svc.id, staffId: null, dateISO: day })
+        .forEach(function (lane) {
+          lane.free.forEach(function (f) {
+            assert.strictEqual(f.start % salon.slotStepMin, 0,
+              salonId + ' on ' + day + ': bar at ' + f.start + ' is not on the ' + salon.slotStepMin + '-minute grid');
+          });
+        });
+    }
+  });
+});
 check('a booking lands on the salon clock, not the host clock', function () {
   var probe = GH.createState(DATA);
   var salon = GH.getSalon(probe, 'goldenhue');

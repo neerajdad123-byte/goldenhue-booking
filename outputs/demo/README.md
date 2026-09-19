@@ -56,15 +56,33 @@ afterwards.
 
 ## Deploying
 
-Node 24 or newer, one small instance, and a persistent disk if you want the
-database to survive a restart. There are no dependencies to install: everything
-comes from Node itself, and the database is a single file.
+Node 24 or newer, one small instance, and **a persistent disk**. There are no
+dependencies to install and the database is a single file, so hosting is mostly a
+question of where that file lives.
 
-Set `PORT` to change the port, and `DB_FILE` to move the database.
+| Host | Works? | The catch |
+|---|---|---|
+| **Render** | Yes, from this repo | `render.yaml` is already here. The disk needs a paid instance; the free tier resets the database on every deploy. |
+| **Fly, Cloud Run, a VPS** | Yes | `Dockerfile` is already here. Mount a volume at `/data`. |
+| **Vercel, Netlify** | Only with a database swap | Serverless has no disk, so SQLite loses every booking on redeploy. Needs Postgres. |
+| **GitHub Pages** | The page only | Static hosting cannot run a server, so the page falls back to preview mode. This is what the public demo is. |
+| **Firebase** | Yes, after a rewrite | Hosting plus Cloud Functions plus Firestore. See below. |
 
-On a host with an ephemeral filesystem the app still works, but bookings are lost
-when the instance restarts. For a real deployment either attach a disk or point the
-database at managed Postgres.
+Set `PORT` to change the port and `DB_FILE` to move the database. Both are read
+from the environment.
+
+### Moving to Firestore
+
+All storage sits behind `store.js`, so this is a second implementation of one
+file, not a rewrite of the application. `store.bookWithGuard()` is the method that
+has to keep its guarantee; the notes at the bottom of that file describe the lock
+document and transaction shape that replaces SQLite's exclusion check.
+
+The reason to move is concurrency or managed backups, not hosting. SQLite on a
+disk already does the job for a salon.
+
+Note that Firebase's Cloud Functions need the Blaze plan, which is pay-as-you-go
+with a card on file, even though the monthly allowance usually costs nothing.
 
 ## Photography
 

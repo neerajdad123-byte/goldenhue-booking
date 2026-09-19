@@ -36,6 +36,27 @@ index.html?salon=cuttingroom&service=cr-cut&staff=arjun&day=1&step=3
 | P3 — the admin console | The day by stylist, editable services, and each stylist's working week. | **Done** — 27 checks in `work/admin-test.js` |
 | P4 — white-label finish | Subdomains, custom domains, confirmation email, .ics, cancel links. | Not started |
 
+## Hosting it without your laptop
+
+Short answer: **you do not need Firebase.** GitHub Pages hosts the customer page
+today, for nothing, but it is static, so it cannot take a booking. Taking bookings
+needs somewhere running `server.js`, and that somewhere needs a disk because the
+database is a file.
+
+| What you want | What to use | Cost |
+|---|---|---|
+| The booking page, public, no backend | **GitHub Pages**, already set up | Free |
+| The whole thing, bookings saved, nobody's laptop involved | **Render**, from this repo: `render.yaml` is in it | Paid instance, because the disk is |
+| The same, with a database that cannot lose data | **Firestore**, then Vercel or Firebase Hosting for the page | Blaze plan needs a card; usage is usually within the free allowance |
+
+Firestore and Firebase are **not** required for hosting. The reason to move is a
+database that survives a redeploy and a backup story you do not have to think
+about, not hosting itself.
+
+The awkward fact about Vercel and Netlify: serverless functions have no disk, so
+SQLite there would lose every booking on each deploy. Pairing them with Firestore
+is a legitimate setup, and it is why the storage seam exists.
+
 **Roughly 20% of the finished product**, but the two things that decide whether the rest is easy — the availability rules and the double-booking defence — are settled, written down and verified. The remaining 80% is mostly screens and plumbing against a design that no longer moves.
 
 ## How double-booking is actually prevented
@@ -50,6 +71,26 @@ against the real HTTP server, not a simulation.
 The same guarantee holds for a stylist who cannot do a service: asking for one is
 refused in the rules layer *and* in the booking path, so a hand-written API call
 cannot sneak past the browser.
+
+**The test that proves it runs two servers at once**, sharing one database file,
+because that is the only configuration where the guarantee can actually fail. Node
+is single-threaded and the SQLite driver is synchronous, so firing parallel requests
+at one process cannot interleave a check with an insert: that test passes even if
+the transaction is deleted, which makes it worthless. `work/race-test.js` starts two
+processes, fires 24 simultaneous bookings at the same slot through both, and asserts
+that exactly one appointment exists afterwards.
+
+Building that test found three real bugs that only appear with more than one
+process, which is exactly what a rolling deploy does:
+
+1. **Both processes tried to seed the database**, and the loser died on boot with a
+   duplicate key. The emptiness check sat outside the transaction. Seeding is now
+   atomic, in all three tables.
+2. **Availability was computed from an in-memory copy** of the bookings, so a
+   booking taken by the other instance was still being offered here. The mirror is
+   now refreshed from the store before anything is computed.
+3. **Two simultaneous boots collided** on the journal-mode switch, which takes an
+   exclusive lock and does not wait. It now retries.
 
 ## The live layer
 

@@ -15,9 +15,9 @@
 var http = require('http');
 var fs = require('fs');
 var path = require('path');
-var { DatabaseSync } = require('node:sqlite');
 var GH = require('./engine.js');
 var DATA = require('./data.js');
+var { createStore } = require('./store.js');
 
 var ROOT = __dirname;
 var PORT = Number(process.env.PORT || 3000);
@@ -34,90 +34,19 @@ var catalog = JSON.parse(JSON.stringify({
 }));
 var state = GH.createState(catalog);
 
-var db = new DatabaseSync(DB_FILE);
-db.exec('PRAGMA journal_mode = WAL');
-db.exec('PRAGMA foreign_keys = ON');
-db.exec(`
-  CREATE TABLE IF NOT EXISTS appointment (
-    id           TEXT PRIMARY KEY,
-    ref          TEXT NOT NULL UNIQUE,
-    salon_id     TEXT NOT NULL,
-    staff_id     TEXT NOT NULL,
-    service_id   TEXT NOT NULL,
-    customer_name  TEXT NOT NULL,
-    customer_phone TEXT NOT NULL DEFAULT '',
-    customer_email TEXT NOT NULL DEFAULT '',
-    note         TEXT NOT NULL DEFAULT '',
-    day          TEXT NOT NULL,
-    start_min    INTEGER NOT NULL,
-    end_min      INTEGER NOT NULL,
-    start_iso    TEXT NOT NULL,
-    end_iso      TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'booked',
-    price        INTEGER NOT NULL,
-    created_at   TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS appointment_lookup
-    ON appointment (salon_id, staff_id, day, status);
-`);
-
-var ins = db.prepare(`INSERT INTO appointment
-  (id, ref, salon_id, staff_id, service_id, customer_name, customer_phone, customer_email,
-   note, day, start_min, end_min, start_iso, end_iso, status, price, created_at)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-
-var byDay = db.prepare(`SELECT * FROM appointment
-  WHERE salon_id = ? AND day = ? AND status IN ('pending','booked','confirmed')`);
-
-var byRef = db.prepare('SELECT * FROM appointment WHERE ref = ?');
-
-/* ---------- the salon's own settings, which the admin console edits ---------- */
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS service_setting (
-    service_id   TEXT PRIMARY KEY,
-    price        INTEGER NOT NULL,
-    duration_min INTEGER NOT NULL,
-    buffer_min   INTEGER NOT NULL,
-    active       INTEGER NOT NULL DEFAULT 1,
-    updated_at   TEXT NOT NULL
-  );
-  /* Weekday is the real one: 0 Sunday through 6 Saturday, matching Date.getDay.
-     More than one row per weekday is allowed, for a split shift. */
-  CREATE TABLE IF NOT EXISTS staff_hours (
-    staff_id  TEXT NOT NULL,
-    weekday   INTEGER NOT NULL,
-    start_min INTEGER NOT NULL,
-    end_min   INTEGER NOT NULL,
-    PRIMARY KEY (staff_id, weekday, start_min)
-  );
-`);
+var store = createStore(DB_FILE);
+store.init();
 
 function seedSettings() {
-  if (db.prepare('SELECT COUNT(*) AS n FROM service_setting').get().n === 0) {
-    var put = db.prepare('INSERT INTO service_setting (service_id, price, duration_min, buffer_min, active, updated_at) VALUES (?,?,?,?,?,?)');
-    for (var s of catalog.services) {
-      put.run(s.id, s.price, s.durationMin, s.bufferMin || 0, 1, new Date().toISOString());
-    }
-  }
-  if (db.prepare('SELECT COUNT(*) AS n FROM staff_hours').get().n === 0) {
-    var putH = db.prepare('INSERT OR IGNORE INTO staff_hours (staff_id, weekday, start_min, end_min) VALUES (?,?,?,?)');
-    for (var st of catalog.staff) {
-      /* the raw catalogue lists the week Monday first, so rotate to real weekdays */
-      (st.hours || []).forEach(function (str, i) {
-        var weekday = (i + 1) % 7;
-        GH.parseWindows(str).forEach(function (w) { putH.run(st.id, weekday, w.start, w.end); });
-      });
-    }
-  }
+  store.seedServiceSettings(catalog.services);
+  store.seedStaffHours(catalog.staff, GH.parseWindows);
 }
 
 function hm(mins) { return GH.hmOfMinutes(mins); }
 
 /* Put the salon's saved settings back onto the raw catalogue. */
 function applySettings() {
-  var byId = {};
-  db.prepare('SELECT * FROM service_setting').all().forEach(function (r) { byId[r.service_id] = r; });
+  var byId = store.serviceSettings();
   catalog.services.forEach(function (s) {
     var r = byId[s.id];
     if (!r) { return; }
@@ -127,11 +56,13 @@ function applySettings() {
     s.active = !!r.active;
   });
 
+  var saved = store.staffHours();
   var hours = {};
-  db.prepare('SELECT * FROM staff_hours ORDER BY staff_id, weekday, start_min').all().forEach(function (h) {
-    if (!hours[h.staff_id]) { hours[h.staff_id] = {}; }
-    if (!hours[h.staff_id][h.weekday]) { hours[h.staff_id][h.weekday] = []; }
-    hours[h.staff_id][h.weekday].push(hm(h.start_min) + '-' + hm(h.end_min));
+  Object.keys(saved).forEach(function (staffId) {
+    hours[staffId] = {};
+    Object.keys(saved[staffId]).forEach(function (wd) {
+      hours[staffId][wd] = saved[staffId][wd].map(function (w) { return hm(w.startMin) + '-' + hm(w.endMin); });
+    });
   });
   catalog.staff.forEach(function (st) {
     var mine = hours[st.id];
@@ -150,54 +81,30 @@ function rebuild() {
   loadAppointments();
 }
 
-/* The guard. Half-open: 10:00-12:00 and 12:00-12:30 do not clash, 11:59 does. */
-var clash = db.prepare(`SELECT ref FROM appointment
-  WHERE salon_id = ? AND staff_id = ? AND day = ?
-    AND status IN ('pending','booked','confirmed')
-    AND start_min < ? AND ? < end_min
-  LIMIT 1`);
-
-/* ---------- mirror the database into the engine's shape ---------- */
+/* ---------- mirror the store into the engine's shape ---------- */
 
 function salonById(id) { return state.salons.filter(function (s) { return s.id === id; })[0]; }
-
-function rowToAppointment(r) {
-  return {
-    id: r.id, ref: r.ref, salonId: r.salon_id, staffId: r.staff_id, serviceId: r.service_id,
-    customerName: r.customer_name, customerPhone: r.customer_phone, customerEmail: r.customer_email,
-    note: r.note, day: r.day, status: r.status, price: r.price,
-    startsAt: new Date(r.start_iso), endsAt: new Date(r.end_iso),
-    bufferUntil: new Date(r.end_iso), startMin: r.start_min, endMin: r.end_min
-  };
-}
 
 function loadAppointments() {
   /* A day either side of today, because the salons in one deployment can sit in
      different timezones and this query has no single "today" to use. */
-  var rows = db.prepare(`SELECT * FROM appointment
-    WHERE status IN ('pending','booked','confirmed') AND day >= ?`).all(GH.addDays(GH.todayYmd(), -1));
-  state.appointments = rows.map(rowToAppointment);
+  state.appointments = store.listActive(GH.addDays(GH.todayYmd(), -1));
 }
 
 /* ---------- seeding ---------- */
 
 function seedIfEmpty() {
-  var count = db.prepare('SELECT COUNT(*) AS n FROM appointment').get().n;
-  if (count > 0) { return; }
   var seeded = GH.createState(DATA).appointments;
-  var tx = db.prepare(`INSERT INTO appointment
-    (id, ref, salon_id, staff_id, service_id, customer_name, customer_phone, customer_email,
-     note, day, start_min, end_min, start_iso, end_iso, status, price, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  for (var a of seeded) {
-    var host = GH.getSalon(state, a.salonId);
-    var startMin = GH.wallMinutes(a.startsAt, host.tz);
-    var endMin = GH.wallMinutes(a.bufferUntil, host.tz);
-    tx.run(a.id, a.ref, a.salonId, a.staffId, a.serviceId, a.customerName, '', '',
-      'Seeded example booking', a.day, startMin, endMin,
-      a.startsAt.toISOString(), a.bufferUntil.toISOString(), 'booked', a.price, new Date().toISOString());
-  }
-  console.log('seeded ' + seeded.length + ' example bookings');
+  var wrote = store.seedIfEmpty(seeded.map(function (a) {
+    return {
+      id: a.id, ref: a.ref, salonId: a.salonId, staffId: a.staffId, serviceId: a.serviceId,
+      customerName: a.customerName, note: 'Seeded example booking',
+      day: a.day, startMin: GH.wallMinutes(a.startsAt, GH.getSalon(state, a.salonId).tz),
+      endMin: GH.wallMinutes(a.bufferUntil, GH.getSalon(state, a.salonId).tz),
+      startsAt: a.startsAt, bufferUntil: a.bufferUntil, status: 'booked', price: a.price
+    };
+  }));
+  if (wrote) { console.log('seeded ' + wrote + ' example bookings'); }
 }
 
 /* ---------- booking, the atomic bit ---------- */
@@ -238,48 +145,43 @@ function createBooking(input) {
   candidates = candidates.filter(function (s) { return capable[s.id]; });
   if (!candidates.length) { return { status: 400, body: { error: 'No stylist can take this service' } }; }
 
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (var st of candidates) {
-      if (!fitsShift(st, salon, day, startMin, endMin)) { continue; }
-      var taken = clash.get(salon.id, st.id, day, endMin, startMin);
-      if (taken) { continue; }
+  /* Whatever fits a shift is a candidate; the store decides which one actually
+     gets it, and does so atomically. */
+  var free = candidates.filter(function (st) { return fitsShift(st, salon, day, startMin, endMin); });
+  if (!free.length) { return { status: 409, body: { error: 'Slot taken', message: GH.SLOT_TAKEN_MESSAGE } }; }
 
-      var appt = {
+  var endAt = new Date(start.getTime() + (endMin - startMin) * 60000);
+  var out = store.bookWithGuard({
+    salonId: salon.id, day: day, startMin: startMin, endMin: endMin,
+    candidates: free.map(function (s) { return s.id; }),
+    make: function (staffId) {
+      return {
         id: 'appt-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
-        ref: makeRef(), salonId: salon.id, staffId: st.id, serviceId: svc.id,
+        ref: makeRef(), salonId: salon.id, staffId: staffId, serviceId: svc.id,
         customerName: String(input.customer.name).trim(),
         customerPhone: String(input.customer.phone || ''),
         customerEmail: String(input.customer.email || ''),
         note: String(input.customer.note || ''),
         day: day, startMin: startMin, endMin: endMin,
+        startsAt: start, endsAt: endAt, bufferUntil: endAt,
         status: 'booked', price: svc.price
       };
-      var endAt = new Date(start.getTime() + (endMin - startMin) * 60000);
-      ins.run(appt.id, appt.ref, appt.salonId, appt.staffId, appt.serviceId,
-        appt.customerName, appt.customerPhone, appt.customerEmail, appt.note,
-        day, startMin, endMin, start.toISOString(), endAt.toISOString(),
-        'booked', svc.price, new Date().toISOString());
-      db.exec('COMMIT');
-
-      var stored = rowToAppointment(byRef.get(appt.ref));
-      state.appointments.push(stored);
-      broadcast(salon.id, { type: 'booked', day: day, staffId: st.id, startMin: startMin, ref: appt.ref });
-      return { status: 201, body: {
-        ref: appt.ref, id: appt.id, salonId: salon.id, staffId: st.id, staffName: st.name,
-        serviceId: svc.id, serviceName: svc.name, day: day, startMin: startMin, endMin: endMin,
-        price: svc.price, startsAt: start.toISOString(), endsAt: endAt.toISOString()
-      } };
     }
-    db.exec('ROLLBACK');
-    return { status: 409, body: {
-      error: 'Slot taken',
-      message: GH.SLOT_TAKEN_MESSAGE
-    } };
-  } catch (e) {
-    try { db.exec('ROLLBACK'); } catch (ignored) { /* the transaction is already gone */ }
-    throw e;
+  });
+
+  if (!out.ok) {
+    return { status: 409, body: { error: 'Slot taken', message: GH.SLOT_TAKEN_MESSAGE } };
   }
+
+  var appt = out.appointment;
+  var st = GH.getStaff(state, appt.staffId);
+  state.appointments.push(appt);
+  broadcast(salon.id, { type: 'booked', day: day, staffId: appt.staffId, startMin: startMin, ref: appt.ref });
+  return { status: 201, body: {
+    ref: appt.ref, id: appt.id, salonId: salon.id, staffId: appt.staffId, staffName: st ? st.name : '',
+    serviceId: svc.id, serviceName: svc.name, day: day, startMin: startMin, endMin: endMin,
+    price: svc.price, startsAt: start.toISOString(), endsAt: endAt.toISOString()
+  } };
 }
 
 /* Inside the shift, on a day the stylist actually works, after the lead time. */
@@ -296,12 +198,11 @@ function fitsShift(staff, salon, day, startMin, endMin) {
 }
 
 function cancelBooking(ref) {
-  var row = byRef.get(ref);
-  if (!row) { return { status: 404, body: { error: 'No such booking' } }; }
-  if (row.status === 'cancelled') { return { status: 200, body: { ref: ref, status: 'cancelled' } }; }
-  db.prepare('UPDATE appointment SET status = ? WHERE ref = ?').run('cancelled', ref);
+  var out = store.cancel(ref);
+  if (!out.ok) { return { status: 404, body: { error: 'No such booking' } }; }
+  var row = out.appointment;
   state.appointments = state.appointments.filter(function (a) { return a.ref !== ref; });
-  broadcast(row.salon_id, { type: 'cancelled', day: row.day, staffId: row.staff_id, startMin: row.start_min, ref: ref });
+  broadcast(row.salonId, { type: 'cancelled', day: row.day, staffId: row.staffId, startMin: row.startMin, ref: ref });
   return { status: 200, body: { ref: ref, status: 'cancelled' } };
 }
 
@@ -350,7 +251,17 @@ function publicConfig() {
 
 /* Availability is always computed for the moment of the request, so it can never
    be stale. Both endpoints call this. */
+/* The mirror of the bookings is refreshed from the store before anything is
+   computed. Reading it once at boot and keeping it in memory is fine for one
+   process and wrong for two: a booking taken by the other instance would still be
+   offered here, and the customer would be refused at the last step. One indexed
+   read per request is a cheap price for never disagreeing with the database. */
+function freshBookings() {
+  loadAppointments();
+}
+
 function availability(query) {
+  freshBookings();
   return GH.availableSlots(state, {
     salonId: query.salon, serviceId: query.service,
     staffId: query.staff && query.staff !== 'any' ? query.staff : null,
@@ -359,6 +270,7 @@ function availability(query) {
 }
 
 function diary(query) {
+  freshBookings();
   return GH.diaryLanes(state, {
     salonId: query.salon, serviceId: query.service,
     staffId: query.staff && query.staff !== 'any' ? query.staff : null,
@@ -368,6 +280,7 @@ function diary(query) {
 
 /* The soonest each stylist could take this service, for the per-stylist view. */
 function staffAvailability(query) {
+  freshBookings();
   var staff = GH.eligibleStaff(state, query.salon, query.service);
   return staff.map(function (s) {
     var got = GH.earliestSlot(state, {
@@ -468,7 +381,7 @@ var server = http.createServer(async function (req, res) {
 
     if (route === '/api/admin/summary') {
       if (!q.salon || !q.date) { return send(res, 400, { error: 'salon and date are required' }); }
-      var rows = byDay.all(q.salon, q.date);
+      var rows = store.listDay(q.salon, q.date);
       var dayStaff = GH.staffForSalon(state, q.salon);
       var lanes = dayStaff.map(function (st) {
         var windows = GH.staffWindows(st, salonById(q.salon), q.date);
@@ -476,9 +389,9 @@ var server = http.createServer(async function (req, res) {
           staffId: st.id, name: st.name, title: st.title,
           working: windows.length > 0,
           hours: windows.map(function (w) { return hm(w.start) + '-' + hm(w.end); }).join(', '),
-          bookedMinutes: rows.filter(function (r) { return r.staff_id === st.id; })
-            .reduce(function (n, r) { return n + (r.end_min - r.start_min); }, 0),
-          appointments: rows.filter(function (r) { return r.staff_id === st.id; }).map(rowToAppointment)
+          bookedMinutes: rows.filter(function (r) { return r.staffId === st.id; })
+            .reduce(function (n, r) { return n + (r.endMin - r.startMin); }, 0),
+          appointments: rows.filter(function (r) { return r.staffId === st.id; })
         };
       });
       var revenue = rows.reduce(function (n, r) { return n + r.price; }, 0);
@@ -490,9 +403,8 @@ var server = http.createServer(async function (req, res) {
 
     if (route === '/api/admin/config') {
       if (!q.salon) { return send(res, 400, { error: 'salon is required' }); }
-      var svc = db.prepare('SELECT * FROM service_setting').all();
-      var mine = {};
-      svc.forEach(function (r) { mine[r.service_id] = r; });
+      var mine = store.serviceSettings();
+      var allHours = store.staffHours();
       return send(res, 200, {
         salonId: q.salon,
         dayNames: GH.DAY_NAMES,
@@ -507,17 +419,12 @@ var server = http.createServer(async function (req, res) {
           };
         }),
         staff: catalog.staff.filter(function (x) { return x.salonId === q.salon; }).map(function (st) {
-          var week = {};
-          db.prepare('SELECT weekday, start_min, end_min FROM staff_hours WHERE staff_id = ? ORDER BY weekday, start_min')
-            .all(st.id).forEach(function (h) {
-              if (!week[h.weekday]) { week[h.weekday] = { startMin: h.start_min, endMin: h.end_min, extra: [] }; }
-              else { week[h.weekday].extra.push({ startMin: h.start_min, endMin: h.end_min }); }
-            });
+          var week = allHours[st.id] || {};
           return {
             id: st.id, name: st.name, title: st.title,
             services: st.services,
             week: [0, 1, 2, 3, 4, 5, 6].map(function (wd) {
-              var w = week[wd];
+              var w = week[wd] && week[wd][0];
               return { weekday: wd, working: !!w, startMin: w ? w.startMin : 540, endMin: w ? w.endMin : 1080 };
             })
           };
@@ -535,11 +442,10 @@ var server = http.createServer(async function (req, res) {
       if (!isFinite(price) || price < 0 || price > 100000000) { return send(res, 400, { error: 'Price must be a whole number of paise, up to 10 lakh' }); }
       if (!isFinite(duration) || duration < 5 || duration > 600) { return send(res, 400, { error: 'Duration must be between 5 and 600 minutes' }); }
       if (!isFinite(buffer) || buffer < 0 || buffer > 120) { return send(res, 400, { error: 'Turnaround must be between 0 and 120 minutes' }); }
-      db.prepare(`INSERT INTO service_setting (service_id, price, duration_min, buffer_min, active, updated_at)
-        VALUES (?,?,?,?,?,?)
-        ON CONFLICT(service_id) DO UPDATE SET price=excluded.price, duration_min=excluded.duration_min,
-          buffer_min=excluded.buffer_min, active=excluded.active, updated_at=excluded.updated_at`)
-        .run(svcRow.id, price, duration, buffer, sbody.active === false ? 0 : 1, new Date().toISOString());
+      store.saveServiceSetting({
+        serviceId: svcRow.id, price: price, durationMin: duration,
+        bufferMin: buffer, active: sbody.active !== false
+      });
       rebuild();
       broadcast(svcRow.salonId, { type: 'settings', serviceId: svcRow.id });
       return send(res, 200, { ok: true, serviceId: svcRow.id, price: price, durationMin: duration, bufferMin: buffer });
@@ -559,17 +465,7 @@ var server = http.createServer(async function (req, res) {
           return send(res, 400, { error: 'Each working day needs a start and an end at least 15 minutes apart' });
         }
       }
-      var clear = db.prepare('DELETE FROM staff_hours WHERE staff_id = ?');
-      var add = db.prepare('INSERT INTO staff_hours (staff_id, weekday, start_min, end_min) VALUES (?,?,?,?)');
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        clear.run(who.id);
-        hbody.week.forEach(function (day) {
-          if (!day.working) { return; }
-          add.run(who.id, Math.round(Number(day.weekday)), Math.round(Number(day.startMin)), Math.round(Number(day.endMin)));
-        });
-        db.exec('COMMIT');
-      } catch (e) { try { db.exec('ROLLBACK'); } catch (x) {} throw e; }
+      store.saveStaffHours(who.id, hbody.week);
       rebuild();
       broadcast(who.salonId, { type: 'settings', staffId: who.id });
       return send(res, 200, { ok: true, staffId: who.id });
@@ -579,9 +475,10 @@ var server = http.createServer(async function (req, res) {
        computing availability locally between pushes. */
     if (route === '/api/appointments-range') {
       if (!q.salon || !q.from || !q.to) { return send(res, 400, { error: 'salon, from and to are required' }); }
-      var range = db.prepare(`SELECT * FROM appointment
-        WHERE salon_id = ? AND day >= ? AND day <= ? AND status IN ('pending','booked','confirmed')`).all(q.salon, q.from, q.to);
-      return send(res, 200, { from: q.from, to: q.to, appointments: range.map(rowToAppointment), serverNow: new Date().toISOString() });
+      return send(res, 200, {
+        from: q.from, to: q.to, appointments: store.listRange(q.salon, q.from, q.to),
+        serverNow: new Date().toISOString()
+      });
     }
 
     if (route === '/api/availability') {
@@ -614,8 +511,7 @@ var server = http.createServer(async function (req, res) {
 
     if (route === '/api/appointments') {
       if (!q.salon || !q.date) { return send(res, 400, { error: 'salon and date are required' }); }
-      var rows = byDay.all(q.salon, q.date);
-      return send(res, 200, { date: q.date, appointments: rows.map(rowToAppointment) });
+      return send(res, 200, { date: q.date, appointments: store.listDay(q.salon, q.date) });
     }
 
     if (route === '/api/stream') {
@@ -643,7 +539,7 @@ var server = http.createServer(async function (req, res) {
     }
 
     if (route === '/health') {
-      return send(res, 200, { ok: true, appointments: db.prepare('SELECT COUNT(*) AS n FROM appointment').get().n, now: new Date().toISOString() });
+      return send(res, 200, { ok: true, appointments: store.countAppointments(), now: new Date().toISOString() });
     }
 
     if (route.indexOf('/api/') === 0) { return send(res, 404, { error: 'Unknown endpoint' }); }

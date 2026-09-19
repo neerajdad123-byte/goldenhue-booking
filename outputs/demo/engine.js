@@ -294,7 +294,10 @@ var GH = (function () {
       });
 
       windows.forEach(function (w) {
-        for (var t = w.start; t + need <= w.end; t += step) {
+        /* Start on the salon's grid, not on whatever minute the window happens to
+           open at. A break ending at 13:45 must not produce a 13:45 booking when
+           the salon books on the half hour. */
+        for (var t = Math.ceil(w.start / step) * step; t + need <= w.end; t += step) {
           var start = atMinutes(day, t, salon.tz);
           var endMs = start.getTime() + need * MIN;
           if (start.getTime() < leadUntil) { continue; }
@@ -362,11 +365,13 @@ var GH = (function () {
       });
       var free = subtract(windows, busy).map(function (f) {
         if (f.end <= leadCut) { return null; }
-        if (f.start < leadCut) {
-          var snapped = Math.ceil(leadCut / step) * step;
-          return snapped < f.end ? { start: snapped, end: f.end } : null;
-        }
-        return f;
+        /* Snap the start onto the salon's slot grid. A turnaround can end at any
+           minute, so a free window often begins at 12:55 while the salon only books
+           12:45 or 13:00. Without this the rail offers a time the diary does not,
+           and the two disagree about what "next free" means. */
+        var earliest = f.start < leadCut ? leadCut : f.start;
+        var start = Math.ceil(earliest / step) * step;
+        return start < f.end ? { start: start, end: f.end } : null;
       }).filter(Boolean);
       return { staff: st, windows: windows, busy: busy, free: free };
     });
