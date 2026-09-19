@@ -54,12 +54,32 @@ function createPostgresStore(url) {
   /* Serverless Postgres closes idle connections, and a salon's booking page is
      idle most of the day. A small pool plus a short idle timeout keeps the first
      request after a quiet spell from failing. */
+  var isLocal = /localhost|127\.0\.0\.1|::1/.test(url);
+
+  /* Sizing the pool is sizing for the worst minute, not the average one.
+
+     A booking holds a connection for the whole transaction, which on a database in
+     another region is several round trips. A pool of four, under a burst of two
+     dozen people, ran out of connections and answered six of them with a server
+     error instead of "that slot has gone". Local testing never showed it, because
+     a database on the same machine answers in microseconds.
+
+     The pooled connection endpoint these hosts provide is built for this: many
+     client connections, multiplexed onto few server ones. So the ceiling is set
+     generously and the wait is long enough for a queue rather than a failure. */
   var pool = new pg.Pool({
     connectionString: url,
-    max: 4,
+    max: Number(process.env.PG_POOL_MAX || 12),
     idleTimeoutMillis: 20000,
-    connectionTimeoutMillis: 10000,
-    ssl: /localhost|127\.0\.0\.1/.test(url) ? false : { rejectUnauthorized: false }
+    connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || 30000),
+    /* A statement that never returns should not hold a connection for ever. */
+    statement_timeout: 15000,
+    query_timeout: 20000,
+    /* Verify the certificate on a managed host. The driver warns that sslmode=require
+       is on its way to meaning "encrypt but do not verify", which is weaker than it
+       sounds and would silently change under us on a future upgrade, so the choice is
+       made here explicitly instead of inherited from the connection string. */
+    ssl: isLocal ? false : { rejectUnauthorized: true }
   });
 
   function q(sql, params) {
@@ -141,6 +161,11 @@ function createPostgresStore(url) {
 
   api.seedIfEmpty = async function (appointments) {
     if (!appointments.length) { return 0; }
+    /* An empty check before opening a transaction, so a normal boot costs one query
+       rather than a connection, a lock and nine inserts. The guarded path below
+       still handles the first boot and any race. */
+    var quick = await q('SELECT COUNT(*) AS n FROM appointment');
+    if (Number(quick[0].n) > 0) { return 0; }
     /* The count and the insert have to be one transaction, or two processes booting
        together both see an empty table and both seed. The advisory lock makes the
        second one wait, so it sees the first one's rows and does nothing.
@@ -263,6 +288,12 @@ function createPostgresStore(url) {
   };
 
   api.seedServiceSettings = async function (services) {
+    /* One query to find out whether there is anything to do. Seeding runs on every
+       boot, and doing it row by row means a round trip per service: on a managed
+       database in another region that is tens of seconds of cold start every time a
+       sleeping free instance wakes up. */
+    var existing = await q('SELECT COUNT(*) AS n FROM service_setting');
+    if (Number(existing[0].n) > 0) { return; }
     for (var s of services) {
       await q(`INSERT INTO service_setting (service_id, price, duration_min, buffer_min, active)
         VALUES ($1,$2,$3,$4,1) ON CONFLICT (service_id) DO NOTHING`,
@@ -301,6 +332,10 @@ function createPostgresStore(url) {
   };
 
   api.seedStaffHours = async function (staff, parseWindows) {
+    /* Same reasoning as the services above: skip the round trips once the week is
+       already stored. */
+    var existing = await q('SELECT COUNT(*) AS n FROM staff_hours');
+    if (Number(existing[0].n) > 0) { return; }
     for (var st of staff) {
       var rows = [];
       (st.hours || []).forEach(function (str, i) {
@@ -345,6 +380,11 @@ function createPostgresStore(url) {
   };
 
   api.close = async function () { try { await pool.end(); } catch (e) { /* already closed */ } };
+
+  /* A parameterised query, for diagnostics and for the checks that need to look at
+     the database directly rather than through the interface. Parameters are always
+     bound, never interpolated. */
+  api.raw = async function (sql, params) { return q(sql, params || []); };
 
   return api;
 }

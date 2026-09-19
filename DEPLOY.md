@@ -26,6 +26,22 @@ and the app is disposable. That is also why this works on a free host at all.
 That string is a password to your data. Do not paste it into a chat, an issue, or
 a screenshot. It goes in one place, in the next step.
 
+Three things worth knowing when you pick the project:
+
+- **Choose a region near the salon.** The app talks to the database on every
+  request, so a database in another continent is felt on every page. India is
+  closest to Singapore or Mumbai.
+- **Use the pooled connection string** if Neon offers both. It ends in
+  `-pooler`. The app opens several connections and pooling is what that endpoint
+  is for.
+- **A booking costs several round trips**, so latency to this database is the
+  single biggest factor in how fast booking feels.
+
+**If the string has been shared anywhere** — pasted into a chat, an issue, a
+screenshot — rotate it: Neon dashboard, Roles, reset the password. Then update
+`DATABASE_URL` on the host and redeploy. It takes a minute and it is the only way
+to unshare a password.
+
 ## Step 2 — the app, one click
 
 <https://render.com/deploy?repo=https://github.com/neerajdad123-byte/goldenhue-booking>
