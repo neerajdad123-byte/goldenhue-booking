@@ -11,6 +11,7 @@
    be computed anywhere; this cannot. */
 'use strict';
 
+var fs = require('fs');
 var path = require('path');
 var { DatabaseSync } = require('node:sqlite');
 var GH = require('./engine.js');
@@ -35,6 +36,13 @@ function toAppointment(r) {
 }
 
 function createStore(file) {
+  /* The database lives on a mounted disk in a real deployment, and that directory
+     is not always there yet: a fresh disk, a new mount path, a first boot. Without
+     this the server dies with "unable to open database file", which is a confusing
+     way to learn that a directory is missing. */
+  if (file && file !== ':memory:') {
+    fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+  }
   var db = new DatabaseSync(file);
   /* Wait for a lock rather than failing the moment the database is busy. Without
      this a second process starting at the same time (a rolling deploy, a second
@@ -131,6 +139,11 @@ function createStore(file) {
 
   q.findAdmin = function (salonId, email) {
     return db.prepare('SELECT * FROM admin_user WHERE salon_id = ? AND email = ?').get(salonId, email) || null;
+  };
+
+  q.updateAdminPassword = function (salonId, email, passwordHash, salt) {
+    db.prepare('UPDATE admin_user SET password_hash = ?, salt = ? WHERE salon_id = ? AND email = ?')
+      .run(passwordHash, salt, salonId, email);
   };
 
   /* ---------- bookings ---------- */

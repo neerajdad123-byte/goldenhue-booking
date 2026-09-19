@@ -86,7 +86,23 @@ function createAuth(store) {
     return sameSecret(hashPassword(String(password || ''), row.salt), row.password_hash) ? row : null;
   }
 
-  return { issue: issue, verify: verify, ensureAdmin: ensureAdmin, checkLogin: checkLogin };
+  /* Keep the environment variable authoritative for that one account, so the
+     password can be rotated by changing it and redeploying. Without this, a
+     forgotten password would mean losing the database or editing it by hand,
+     and neither is something to ask of a salon. */
+  function syncAdminPassword(salonId, email, password) {
+    var row = store.findAdmin(salonId, String(email).toLowerCase().trim());
+    if (!row) { return ensureAdmin(salonId, email, password); }
+    if (sameSecret(hashPassword(String(password), row.salt), row.password_hash)) { return false; }
+    var salt = newSalt();
+    store.updateAdminPassword(salonId, row.email, hashPassword(String(password), salt), salt);
+    return true;
+  }
+
+  return {
+    issue: issue, verify: verify, ensureAdmin: ensureAdmin,
+    checkLogin: checkLogin, syncAdminPassword: syncAdminPassword
+  };
 }
 
 /* Minimal cookie reading. The header is a semicolon-separated list of name=value

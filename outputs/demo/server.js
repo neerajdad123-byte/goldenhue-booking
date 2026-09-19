@@ -48,14 +48,18 @@ var SESSION_DAYS = 30;
 function bootstrapAdmin() {
   var email = process.env.ADMIN_EMAIL || 'owner@goldenhue.local';
   var password = process.env.ADMIN_PASSWORD;
-  var created = [];
+  var created = [], updated = [];
   for (var s of catalog.salons) {
-    if (store.countAdmins(s.id) > 0) { continue; }
     if (!password) { continue; }
-    if (auth.ensureAdmin(s.id, email, password)) { created.push(s.id); }
+    if (store.countAdmins(s.id) === 0) {
+      if (auth.ensureAdmin(s.id, email, password)) { created.push(s.id); }
+    } else if (auth.syncAdminPassword(s.id, email, password)) {
+      updated.push(s.id);
+    }
   }
   if (created.length) { console.log('created front-desk login for: ' + created.join(', ') + ' as ' + email); }
-  else {
+  if (updated.length) { console.log('front-desk password updated from ADMIN_PASSWORD for: ' + updated.join(', ')); }
+  if (!created.length && !updated.length) {
     var missing = catalog.salons.filter(function (s) { return store.countAdmins(s.id) === 0; });
     if (missing.length) {
       console.warn('no front-desk login for: ' + missing.map(function (s) { return s.id; }).join(', ') +

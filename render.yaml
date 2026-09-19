@@ -1,28 +1,41 @@
-# One-click hosting on Render, from this repository.
+# One-click deploy for this repository:
+#   https://render.com/deploy?repo=https://github.com/neerajdad123-byte/goldenhue-booking
 #
-# Render builds nothing (there are no dependencies) and runs the same command you
-# run locally. The disk is the important line: it is what makes the bookings
-# survive a restart or a redeploy.
+# Why this is not on the free plan, in Render's own words: free web services have
+# an "ephemeral filesystem", and "any changes to your web service's filesystem
+# (uploaded images, local SQLite databases, etc.) are lost every time the service
+# redeploys, restarts, or spins down". Free services also spin down after 15
+# minutes without traffic. The database is the whole product here, so a free
+# instance would wipe every booking several times a day.
 #
-# ponytail: a disk needs a paid instance type. On the free tier drop the disk
-# block and accept that the database resets on every deploy, which is fine for a
-# demo and not fine for a salon.
+# ponytail: to try it on free, delete the disk block and set plan: free. Bookings
+# then vanish on the next restart, which is fine for a look and useless for a salon.
 services:
   - type: web
     name: goldenhue-booking
     runtime: node
     plan: starter
-    buildCommand: ""
-    startCommand: node outputs/demo/server.js
+    # The app has its own package.json and no dependencies, so this is the whole build.
+    rootDir: outputs/demo
+    buildCommand: npm install
+    startCommand: node server.js
     healthCheckPath: /health
     envVars:
+      # node:sqlite needs Node 24. New services already default to it; this makes it certain.
       - key: NODE_VERSION
         value: "24"
+      # The one directory the disk is mounted at, and the only place that survives.
       - key: DB_FILE
-        value: /var/goldenhue/goldenhue.db
-      - key: PORT
-        value: "10000"
+        value: /var/data/goldenhue.db
+      # Render serves over https, so the session cookie can be Secure.
+      - key: COOKIE_SECURE
+        value: "1"
+      # Prompted once during the deploy. sync: false keeps them out of the repository.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
     disk:
       name: goldenhue-data
-      mountPath: /var/goldenhue
+      mountPath: /var/data
       sizeGB: 1

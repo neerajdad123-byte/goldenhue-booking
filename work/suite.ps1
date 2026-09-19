@@ -89,6 +89,11 @@ if ($api) {
   $race = node work/race-test.js | Select-Object -Last 1
   Write-Host "   $race"
   if ($LASTEXITCODE -ne 0) { $fail = 1 }
+
+  Write-Host "== a booking survives a restart"
+  $persist = node work/persist-test.js 10002 | Select-Object -Last 1
+  Write-Host "   $persist"
+  if ($LASTEXITCODE -ne 0) { $fail = 1 }
 } else {
   Write-Host "== API checks skipped (set GOLDENHUE_API, for example http://localhost:3000)"
 }
