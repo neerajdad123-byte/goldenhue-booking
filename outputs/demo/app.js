@@ -40,7 +40,9 @@
   function initials(full) {
     return String(full).split(' ').slice(0, 2).map(function (p) { return p.charAt(0); }).join('').toUpperCase();
   }
-  function minutesOf(d) { return d.getHours() * 60 + d.getMinutes(); }
+  /* read on the salon's clock, so a customer browsing from another timezone still
+     sees and books the times the salon means */
+  function minutesOf(d) { return E.wallMinutes(d, salon().tz); }
 
   function reset() {
     state = E.createState(DATA);
@@ -542,7 +544,7 @@
             'title="' + span + ' minutes free, this service needs ' + need + '"></div>';
           return;
         }
-        var iso = E.atMinutes(ui.dateISO, f.start).toISOString();
+        var iso = E.atMinutes(ui.dateISO, f.start, salon().tz).toISOString();
         var delay = Math.min(index * 26, 320);
         index += 1;
         blocks += '<button type="button" class="blk blk-free" data-start="' + esc(iso) + '" data-staff="' + esc(lane.staff.id) + '"' +

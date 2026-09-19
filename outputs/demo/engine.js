@@ -21,10 +21,43 @@ var GH = (function () {
   function todayYmd() { return ymd(new Date()); }
   function addDays(day, n) { var d = parseYmd(day); d.setDate(d.getDate() + n); return ymd(d); }
   function weekdayOf(day) { return parseYmd(day).getDay(); }
-  function atMinutes(day, mins) { return new Date(parseYmd(day).getTime() + mins * MIN); }
+  /* ---------- the salon's clock ----------
+
+     A salon has a wall clock: 10:00 means ten in the morning where the chairs are,
+     whatever the machine doing the arithmetic believes the time to be.
+
+     Every function below takes an explicit offset in minutes east of UTC. Omitted,
+     it falls back to the host's own offset, which is what a browser wants and keeps
+     local testing identical to before. The server always passes the salon's offset,
+     so a host running in UTC cannot shift anyone's bookings.
+
+     ponytail: one fixed offset per salon, because these salons are in India and
+     India has no daylight saving. Selling into a country that does needs
+     Intl.DateTimeFormat to resolve the offset per date. Every call site already
+     passes an offset, so that one function is the whole change. */
+  function offsetOf(tz) { return tz == null ? -new Date().getTimezoneOffset() : tz; }
+
+  function atMinutes(day, mins, tz) {
+    var p = String(day).split('-');
+    return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]) + (mins - offsetOf(tz)) * MIN);
+  }
+
+  /* Minutes past midnight on the salon's clock, for a real instant. */
+  function wallMinutes(when, tz) {
+    var total = Math.floor((when.getTime() + offsetOf(tz) * MIN) / MIN);
+    return ((total % 1440) + 1440) % 1440;
+  }
+
+  /* The calendar day on the salon's clock, for a real instant. */
+  function wallDay(when, tz) {
+    var s = new Date(when.getTime() + offsetOf(tz) * MIN);
+    return s.getUTCFullYear() + '-' + pad(s.getUTCMonth() + 1) + '-' + pad(s.getUTCDate());
+  }
+
+  function todayIn(tz) { return wallDay(new Date(), tz); }
   function minutesOfDay(hm) { var p = String(hm).split(':'); return (+p[0]) * 60 + (+p[1]); }
   function hmOfMinutes(m) { return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
-  function minutesOfDate(d) { return d.getHours() * 60 + d.getMinutes(); }
+  function minutesOfDate(d, tz) { return wallMinutes(d, tz); }
 
   function clockLabel(mins) {
     var h = Math.floor(mins / 60), m = mins % 60, ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12;
@@ -133,6 +166,8 @@ var GH = (function () {
         headline: s.headline, sub: s.sub, reviews: (s.reviews || []).slice(),
         cover: s.cover || null, gallery: (s.gallery || []).slice(),
         currency: 'INR', timezone: 'Asia/Kolkata', brand: s.brand,
+        /* minutes east of UTC, so availability means the salon's clock */
+        tz: s.tz == null ? 330 : s.tz,
         slotStepMin: s.slotStepMin, leadTimeMin: s.leadTimeMin, horizonDays: s.horizonDays,
         cancellationHours: s.cancellationHours,
         hoursMin: orderWeek(s.hours),
@@ -158,8 +193,10 @@ var GH = (function () {
        them separately, so a catalogue without them must still build */
     var appointments = (data.appointments || []).map(function (a, i) {
       var svc = services.filter(function (s) { return s.id === a.serviceId; })[0];
-      var day = addDays(today, a.dayOffset || 0);
-      var start = atMinutes(day, minutesOfDay(a.start));
+      /* the day and the clock both belong to the salon, not to whoever is seeding */
+      var host = salon(a.salonId);
+      var day = addDays(todayIn(host ? host.tz : null), a.dayOffset || 0);
+      var start = atMinutes(day, minutesOfDay(a.start), host ? host.tz : null);
       var end = new Date(start.getTime() + svc.durationMin * MIN);
       return {
         id: 'seed-' + i, ref: makeRef(), salonId: a.salonId, staffId: a.staffId, serviceId: a.serviceId,
@@ -239,7 +276,7 @@ var GH = (function () {
     var step = salon.slotStepMin;
     var need = svc.durationMin + svc.bufferMin;
     var leadUntil = now.getTime() + salon.leadTimeMin * MIN;
-    var lastDay = addDays(todayYmd(), salon.horizonDays);
+    var lastDay = addDays(todayIn(salon.tz), salon.horizonDays);
 
     var result = { slots: [], reason: null, closedReason: salon.closed[day] || null };
     if (day > lastDay) { result.reason = 'TOO_FAR'; return result; }
@@ -258,7 +295,7 @@ var GH = (function () {
 
       windows.forEach(function (w) {
         for (var t = w.start; t + need <= w.end; t += step) {
-          var start = atMinutes(day, t);
+          var start = atMinutes(day, t, salon.tz);
           var endMs = start.getTime() + need * MIN;
           if (start.getTime() < leadUntil) { continue; }
           var clash = busy.some(function (b) { return overlap(start.getTime(), endMs, b.s, b.e); });
@@ -276,7 +313,7 @@ var GH = (function () {
   }
 
   function nextDays(salon, count) {
-    var out = [], start = todayYmd();
+    var out = [], start = todayIn(salon.tz);
     for (var i = 0; i < count; i += 1) {
       var day = addDays(start, i);
       out.push({ date: day, closed: !!salon.closed[day], reason: salon.closed[day] || null, dow: weekdayOf(day) });
@@ -315,7 +352,7 @@ var GH = (function () {
     var salon = getSalon(state, opts.salonId);
     var now = opts.now || new Date();
     var step = salon.slotStepMin;
-    var leadCut = opts.dateISO === todayYmd() ? minutesOfDate(now) + salon.leadTimeMin : -1;
+    var leadCut = opts.dateISO === todayIn(salon.tz) ? minutesOfDate(now, salon.tz) + salon.leadTimeMin : -1;
 
     var people = opts.staffId ? [getStaff(state, opts.staffId)] : eligibleStaff(state, opts.salonId, opts.serviceId);
     return people.filter(Boolean).map(function (st) {
@@ -345,7 +382,7 @@ var GH = (function () {
     var salon = getSalon(state, opts.salonId);
     var svc = getService(state, opts.serviceId);
     var start = new Date(opts.startISO);
-    var day = ymd(start);
+    var day = wallDay(start, salon.tz);
     var end = new Date(start.getTime() + svc.durationMin * MIN);
     var bufferUntil = new Date(end.getTime() + svc.bufferMin * MIN);
 
@@ -360,7 +397,7 @@ var GH = (function () {
     var chosen = null;
     for (var i = 0; i < candidates.length; i += 1) {
       var st = candidates[i];
-      var startMin = start.getHours() * 60 + start.getMinutes();
+      var startMin = wallMinutes(start, salon.tz);
       var need = svc.durationMin + svc.bufferMin;
       var inside = staffWindows(st, salon, day).some(function (w) {
         return w.start <= startMin && w.end >= startMin + need;
@@ -419,6 +456,7 @@ var GH = (function () {
     ymd: ymd, parseYmd: parseYmd, todayYmd: todayYmd, addDays: addDays, weekdayOf: weekdayOf,
     atMinutes: atMinutes, minutesOfDay: minutesOfDay, hmOfMinutes: hmOfMinutes,
     minutesOfDate: minutesOfDate, diaryLanes: diaryLanes,
+    offsetOf: offsetOf, wallMinutes: wallMinutes, wallDay: wallDay, todayIn: todayIn,
     clockLabel: clockLabel, durationLabel: durationLabel, formatINR: formatINR, dateParts: dateParts
   };
 }());

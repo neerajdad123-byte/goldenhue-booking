@@ -172,8 +172,10 @@ function rowToAppointment(r) {
 }
 
 function loadAppointments() {
+  /* A day either side of today, because the salons in one deployment can sit in
+     different timezones and this query has no single "today" to use. */
   var rows = db.prepare(`SELECT * FROM appointment
-    WHERE status IN ('pending','booked','confirmed') AND day >= ?`).all(GH.todayYmd());
+    WHERE status IN ('pending','booked','confirmed') AND day >= ?`).all(GH.addDays(GH.todayYmd(), -1));
   state.appointments = rows.map(rowToAppointment);
 }
 
@@ -188,8 +190,9 @@ function seedIfEmpty() {
      note, day, start_min, end_min, start_iso, end_iso, status, price, created_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   for (var a of seeded) {
-    var startMin = a.startsAt.getHours() * 60 + a.startsAt.getMinutes();
-    var endMin = a.bufferUntil.getHours() * 60 + a.bufferUntil.getMinutes();
+    var host = GH.getSalon(state, a.salonId);
+    var startMin = GH.wallMinutes(a.startsAt, host.tz);
+    var endMin = GH.wallMinutes(a.bufferUntil, host.tz);
     tx.run(a.id, a.ref, a.salonId, a.staffId, a.serviceId, a.customerName, '', '',
       'Seeded example booking', a.day, startMin, endMin,
       a.startsAt.toISOString(), a.bufferUntil.toISOString(), 'booked', a.price, new Date().toISOString());
@@ -215,8 +218,10 @@ function createBooking(input) {
 
   var start = new Date(input.startISO);
   if (isNaN(start.getTime())) { return { status: 400, body: { error: 'Bad start time' } }; }
-  var day = GH.ymd(start);
-  var startMin = start.getHours() * 60 + start.getMinutes();
+  /* The salon's clock, not the host's. A server running in UTC must still record
+     10:00 as 10:00 where the chairs are, or every booking shifts by the offset. */
+  var day = GH.wallDay(start, salon.tz);
+  var startMin = GH.wallMinutes(start, salon.tz);
   var endMin = startMin + svc.durationMin + svc.bufferMin;
 
   /* who could take it: the requested stylist, or anyone free at that minute */
@@ -283,8 +288,8 @@ function fitsShift(staff, salon, day, startMin, endMin) {
   var inside = windows.some(function (w) { return w.start <= startMin && w.end >= endMin; });
   if (!inside) { return false; }
   var now = new Date();
-  if (day === GH.todayYmd()) {
-    var mins = now.getHours() * 60 + now.getMinutes();
+  if (day === GH.todayIn(salon.tz)) {
+    var mins = GH.wallMinutes(now, salon.tz);
     if (startMin < mins + salon.leadTimeMin) { return false; }
   }
   return true;

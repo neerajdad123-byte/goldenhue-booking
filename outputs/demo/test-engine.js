@@ -158,6 +158,39 @@ check('nothing is offered past the booking horizon', function () {
 });
 
 console.log('display helpers');
+check('a booking lands on the salon clock, not the host clock', function () {
+  var probe = GH.createState(DATA);
+  var salon = GH.getSalon(probe, 'goldenhue');
+  /* 10:00 in Bengaluru is 04:30 UTC. The host's own timezone must not matter. */
+  var instant = new Date(Date.UTC(2026, 8, 19, 4, 30));
+  assert.strictEqual(GH.wallDay(instant, salon.tz), '2026-09-19');
+  assert.strictEqual(GH.wallMinutes(instant, salon.tz), 600);
+  /* and back again: 10:00 on the salon clock is that same instant */
+  assert.strictEqual(GH.atMinutes('2026-09-19', 600, salon.tz).toISOString(), instant.toISOString());
+});
+check('without the offset the reading is wrong, which is why it is passed', function () {
+  /* late evening UTC is already tomorrow morning in India */
+  var instant = new Date(Date.UTC(2026, 8, 19, 20, 0));
+  assert.strictEqual(GH.wallDay(instant, 330), '2026-09-20');
+  assert.strictEqual(GH.wallDay(instant, 0), '2026-09-19');
+  assert.strictEqual(GH.wallMinutes(instant, 330), 90);
+  assert.strictEqual(GH.wallMinutes(instant, 0), 1200);
+});
+check('the salon day is read on the salon clock everywhere', function () {
+  var probe = GH.createState(DATA);
+  var salon = GH.getSalon(probe, 'goldenhue');
+  assert.strictEqual(salon.tz, 330, 'salons default to India');
+  /* a slot offered for a date must round-trip back to that date and minute */
+  var res = GH.availableSlots(probe, {
+    salonId: 'goldenhue', serviceId: 'gh-haircut', staffId: 'ramesh', dateISO: TUE
+  });
+  assert.ok(res.slots.length > 0, 'nothing offered, so there is nothing to round-trip');
+  res.slots.forEach(function (s) {
+    var when = new Date(s.startISO);
+    assert.strictEqual(GH.wallDay(when, salon.tz), TUE, 'slot ' + s.startISO + ' reads as another day');
+    assert.strictEqual(GH.wallMinutes(when, salon.tz), s.startMin, 'slot ' + s.startISO + ' reads as another minute');
+  });
+});
 check('salon copy survives normalisation', function () {
   /* a catalogue with no bookings must still build: the server sends them apart */
   var bare = GH.createState({ salons: DATA.salons, services: DATA.services, staff: DATA.staff });
