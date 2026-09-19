@@ -1,26 +1,15 @@
 {
+  "name": "goldenhue-test-harness",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tooling for the checks in work/. The application lives in outputs/demo and has its own package.json, which is what gets deployed.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "powershell -NoProfile -ExecutionPolicy Bypass -File work/suite.ps1"
+  },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@electric-sql/pglite-socket": "^0.2.11",
     "pg": "^8.23.0"
-  },
-  "name": "se",
-  "version": "1.0.0",
-  "description": "White-label booking for salons. One codebase, many salons: a salon is a record, not a deployment. Customers pick a service, a stylist and a time; the salon runs its day from a front desk behind a password.",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/neerajdad123-byte/goldenhue-booking.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/neerajdad123-byte/goldenhue-booking/issues"
-  },
-  "homepage": "https://github.com/neerajdad123-byte/goldenhue-booking#readme"
+  }
 }

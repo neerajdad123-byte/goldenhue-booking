@@ -196,6 +196,15 @@ var GH = (function () {
       /* the day and the clock both belong to the salon, not to whoever is seeding */
       var host = salon(a.salonId);
       var day = addDays(todayIn(host ? host.tz : null), a.dayOffset || 0);
+      /* Example bookings land on a day that stylist actually works. Seeding onto a
+         day off produced a diary that contradicted itself: two appointments for
+         someone who was not in, which then looked like a bug in the front desk. */
+      var person = staff.filter(function (s) { return s.id === a.staffId; })[0];
+      if (person && host) {
+        for (var shift = 0; shift < 8 && !staffWindows(person, host, day).length; shift += 1) {
+          day = addDays(day, 1);
+        }
+      }
       var start = atMinutes(day, minutesOfDay(a.start), host ? host.tz : null);
       var end = new Date(start.getTime() + svc.durationMin * MIN);
       return {

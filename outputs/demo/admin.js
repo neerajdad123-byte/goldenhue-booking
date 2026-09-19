@@ -84,12 +84,12 @@
 
     el('lanes').innerHTML = state.lanes.map(function (lane) {
       var body;
-      if (!lane.working) {
-        body = '<p class="lane-off">Not working this day</p>';
-      } else if (!lane.appointments.length) {
-        body = '<p class="lane-empty">Nothing booked. The whole day is open.</p>';
-      } else {
-        body = lane.appointments.map(function (a) {
+      /* Bookings come first, always. A stylist can have appointments on a day they
+         are no longer scheduled to work: someone changed their week, or added
+         holiday, after the booking was taken. Hiding those would send a customer to
+         a closed door with nothing on the front desk to explain it, so they are
+         shown with a warning instead. */
+      var appts = lane.appointments.map(function (a) {
           var svc = (config && config.services.filter(function (s) { return s.id === a.serviceId; })[0]) || {};
           return '<article class="appt">' +
             '<p class="appt-time">' + E.clockLabel(a.startMin) + '</p>' +
@@ -99,6 +99,16 @@
             '<p class="appt-ref">' + esc(a.ref) + ' &middot; ' + money(a.price) + '</p></div>' +
           '</article>';
         }).join('');
+
+      if (lane.appointments.length) {
+        body = (lane.working ? '' :
+          '<p class="lane-warn">Not scheduled to work, but has ' +
+          (lane.appointments.length === 1 ? 'a booking' : lane.appointments.length + ' bookings') +
+          '. Either cover it or call them.</p>') + appts;
+      } else if (!lane.working) {
+        body = '<p class="lane-off">Not working this day</p>';
+      } else {
+        body = '<p class="lane-empty">Nothing booked. The whole day is open.</p>';
       }
       return '<div class="lane' + (lane.working ? '' : ' off') + '">' +
         '<div class="lane-top"><div><p class="lane-name">' + esc(lane.name) + '</p>' +

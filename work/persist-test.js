@@ -43,10 +43,17 @@ async function waitUp() {
   var server = start();
   if (!await waitUp()) { throw new Error('server never came up'); }
 
-  var day = new Date(Date.now() + 12 * 86400000).toISOString().slice(0, 10);
-  var slots = await (await fetch(BASE + '/api/availability?salon=goldenhue&service=gh-haircut&staff=ramesh&date=' + day)).json();
-  check('a slot is free to begin with', slots.slots && slots.slots.length > 0, 'none on ' + day);
-  var target = slots.slots[0];
+  /* Search for a day with room rather than assuming an offset. Other tests run
+     before this one and book real slots; a fixed day eventually collides with one
+     of them and reads as a broken system. */
+  var day = null, target = null;
+  for (var d = 1; d <= 20 && !target; d += 1) {
+    var probeDay = new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
+    var probe = await (await fetch(BASE + '/api/availability?salon=goldenhue&service=gh-haircut&staff=ramesh&date=' + probeDay)).json();
+    if (probe.slots && probe.slots.length) { day = probeDay; target = probe.slots[0]; }
+  }
+  check('a slot is free to begin with', !!target, 'nothing free in three weeks');
+  if (!target) { throw new Error('no availability to test'); }
 
   var booked = await (await fetch(BASE + '/api/book', {
     method: 'POST', headers: { 'content-type': 'application/json' },

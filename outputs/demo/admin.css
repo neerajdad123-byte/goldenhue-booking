@@ -59,6 +59,11 @@
 .appt-ref { font-size: .64rem; letter-spacing: .12em; color: var(--ink-3); margin-top: 5px; }
 .lane-empty { padding: 18px 14px; text-align: center; color: var(--ink-3); font-size: .82rem; }
 .lane-off { padding: 22px 14px; text-align: center; color: var(--ink-3); font-style: italic; font-size: .84rem; }
+.lane-warn {
+  padding: 11px 12px; margin-bottom: 8px; border-radius: 3px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border-left: 3px solid var(--danger); color: var(--danger); font-size: .8rem;
+}
 
 /* ---------- tables and forms ---------- */
 
@@ -106,6 +111,20 @@
 @media (max-width: 620px) {
   .dayrow { grid-template-columns: 1fr; gap: 8px; }
   .dayrow .times { justify-content: flex-start; }
+}
+
+/* The front desk gets used on a phone behind the counter, so its controls need
+   thumbs too. The customer page already had this; the admin page has its own
+   stylesheet and was missed, leaving 19px-tall inputs. */
+@media (max-width: 859px) {
+  .admin .num, .admin .time, .signin .num, .signin .field input {
+    min-height: 44px; padding: 11px 10px;
+  }
+  .admin .btn, .admin .mini-btn, .signin .btn { min-height: 44px; }
+  .admin .daynav .btn { min-width: 44px; }
+  .toggle { min-height: 44px; align-items: center; }
+  .toggle input { width: 22px; height: 22px; }
+  .grid td, .grid th { padding-top: 8px; padding-bottom: 8px; }
 }
 
 @media (min-width: 900px) {

@@ -1261,18 +1261,25 @@
   }
 
   /* A deep link so a screenshot or a shared URL can land on a later step:
-     ?salon=goldenhue&service=gh-colour&staff=ramesh&day=1&step=3 */
+     ?salon=goldenhue&service=gh-colour&staff=ramesh&day=1&step=3
+
+     An explicit date=YYYY-MM-DD is also accepted, and preferred. An offset is
+     relative to whichever day the reader thinks it is, which is not the same
+     calendar everywhere: a link built from a UTC clock and opened by a salon on IST
+     lands a day out. A date cannot be misread. */
   function applyDeepLink() {
     var q = new URLSearchParams(window.location.search);
     if (q.get('salon') && E.getSalon(state, q.get('salon'))) { ui.salonId = q.get('salon'); }
     var svc = q.get('service');
     if (svc && E.getService(state, svc)) { ui.serviceId = svc; ui.step = 2; }
     if (ui.serviceId && q.get('staff')) { ui.staffId = q.get('staff') === 'any' ? null : q.get('staff'); }
+    var explicit = q.get('date');
     var day = parseInt(q.get('day'), 10);
-    if (!isNaN(day)) { ui.dateISO = E.addDays(E.todayYmd(), day); }
+    if (explicit && /^\d{4}-\d{2}-\d{2}$/.test(explicit)) { ui.dateISO = explicit; }
+    else if (!isNaN(day)) { ui.dateISO = E.addDays(E.todayYmd(), day); }
     var step = parseInt(q.get('step'), 10);
     if (!isNaN(step) && step >= 1 && step <= 5) { ui.step = step; }
-    if (isNaN(day) && ui.serviceId && ui.step >= 3) { ui.dateISO = firstOpenDay(ui.serviceId, ui.staffId); }
+    if (!explicit && isNaN(day) && ui.serviceId && ui.step >= 3) { ui.dateISO = firstOpenDay(ui.serviceId, ui.staffId); }
   }
 
   async function boot() {

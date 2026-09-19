@@ -7,8 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
-<link rel="stylesheet" href="admin.css">
+<!-- Absolute: this is reachable at /admin and /admin/, and a relative stylesheet
+     only resolves from one of them. -->
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/admin.css">
 </head>
 <body class="admin">
 
@@ -73,7 +75,7 @@
 
 <div class="toast" id="toast" role="alert" aria-live="assertive" hidden></div>
 
-<script src="engine.js"></script>
-<script src="admin.js"></script>
+<script src="/engine.js"></script>
+<script src="/admin.js"></script>
 </body>
 </html>

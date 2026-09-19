@@ -189,6 +189,43 @@ async function post(p, body) {
     updates.every(function (u) { return u.type === 'hello' || !spot || u.staffId === spot.staffId; }), JSON.stringify(updates));
 
   console.log('input the server must not trust');
+  /* Every asset a page links to has to resolve from the URL that page is served
+     at. A relative stylesheet on a nested route silently 404s and the page renders
+     unstyled, which is exactly what happened to the sign-in page. */
+  console.log('every page can load what it asks for');
+  var login = await fetch(BASE + '/api/admin/login', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      salonId: 'goldenhue',
+      email: process.env.ADMIN_EMAIL || 'owner@goldenhue.local',
+      password: process.env.ADMIN_PASSWORD || 'devpassword123'
+    })
+  });
+  var sessionCookie = (login.headers.get('set-cookie') || '').split(';')[0];
+
+  var pages = ['/', '/admin', '/admin/', '/admin/login'];
+  for (var pagePath of pages) {
+    var pageRes = await fetch(BASE + pagePath, {
+      headers: sessionCookie ? { cookie: sessionCookie } : {}, redirect: 'follow'
+    });
+    var html = await pageRes.text();
+    var refs = (html.match(/(?:href|src)="([^"]+)"/g) || [])
+      .map(function (m) { return m.replace(/^(?:href|src)="/, '').replace(/"$/, ''); })
+      .filter(function (u) { return !/^(https?:|data:|#|mailto:)/.test(u); });
+    var missing = [];
+    for (var ref of refs) {
+      var resolved = new URL(ref, new URL(BASE + pagePath)).href;
+      var asset = await fetch(resolved, { method: 'GET' });
+      if (asset.status !== 200) { missing.push(ref + ' -> ' + asset.status); }
+    }
+    check('every asset on ' + pagePath + ' loads (' + refs.length + ' checked)', missing.length === 0,
+      missing.join(', '));
+  }
+
+  /* And the sign-in page must actually be styled, not merely served. */
+  var loginHtml = await (await fetch(BASE + '/admin/login')).text();
+  check('the sign-in page links to its stylesheets', /href="\/admin\.css"/.test(loginHtml) && /href="\/styles\.css"/.test(loginHtml));
+
   /* The front desk is the only thing that writes, so it is the only thing that
      needs a session. These checks are the difference between "sign in" and
      "anyone on the internet can change the prices". */

@@ -119,7 +119,10 @@ async function rpc2(port, method, params) {
   }
   var freeDay = await firstFreeDay('gh-haircut', 'ramesh', 14);
   check('some day in the next fortnight still has room', !!freeDay, 'the diary is full for two weeks');
-  var RIDE = BASE + '?service=gh-haircut&staff=ramesh&day=' + freeDay.offset + '&step=3';
+  /* An explicit date, not an offset: this test built offsets from a UTC clock while
+     the page reads the salon's clock, and in the early hours those disagree by a
+     day, which pointed the rail at a day with nothing on it. */
+  var RIDE = BASE + '?service=gh-haircut&staff=ramesh&date=' + freeDay.day + '&step=3';
 
   await go(BASE);
   check('the badge reads Live', (await ev('document.getElementById("liveBadge").textContent')) === 'Live',
@@ -157,7 +160,13 @@ async function rpc2(port, method, params) {
   check('and it is retrievable by reference', stored === true);
 
   console.log('the booking is live in another tab');
-  var other = await rpc(ws, st, 'Target.createTarget', { url: RIDE });
+  /* A fresh day for the second tab. It used to open the same day the first tab had
+     just booked out, so it sometimes had no free bar to offer and the test read as
+     a product failure. */
+  var freshDay = await firstFreeDay('gh-haircut', 'ramesh', 14);
+  check('another day still has room for the second tab', !!freshDay, 'nothing free for a fortnight');
+  var SECOND_RIDE = BASE + '?service=gh-haircut&staff=ramesh&date=' + freshDay.day + '&step=3';
+  var other = await rpc(ws, st, 'Target.createTarget', { url: SECOND_RIDE });
   await new Promise(function (r) { setTimeout(r, 2500); });
   var tabs = await (await fetch('http://127.0.0.1:' + PORT + '/json/list')).json();
   var second = tabs.filter(function (t) { return t.id === other.targetId; })[0];

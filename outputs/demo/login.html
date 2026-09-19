@@ -7,8 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
-<link rel="stylesheet" href="admin.css">
+<!-- Absolute, because this page is served from /admin/login: a relative
+     "admin.css" would resolve to /admin/admin.css and 404, leaving the page
+     completely unstyled. -->
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/admin.css">
 </head>
 <body class="admin signin">
 

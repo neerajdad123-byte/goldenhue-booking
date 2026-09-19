@@ -102,6 +102,17 @@ if ($api) {
   $persist = node work/persist-test.js 10002 | Select-Object -Last 1
   Write-Host "   $persist"
   if ($LASTEXITCODE -ne 0) { $fail = 1 }
+
+  # Runs last because it installs into a scratch directory, which takes a moment.
+  Write-Host "== a fresh checkout installs and boots"
+  node work/deploy-test.js > work/deploy-last.log 2>&1
+  $deploy = Get-Content work/deploy-last.log | Select-Object -Last 1
+  Write-Host "   $deploy"
+  if ($LASTEXITCODE -ne 0) {
+    $fail = 1
+    Write-Host "   full report: work/deploy-last.log"
+    Get-Content work/deploy-last.log | Where-Object { $_ -match 'FAIL' } | Select-Object -First 6 | ForEach-Object { Write-Host "   $_" }
+  }
 } else {
   Write-Host "== API checks skipped (set GOLDENHUE_API, for example http://localhost:3000)"
 }

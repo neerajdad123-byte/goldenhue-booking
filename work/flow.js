@@ -124,6 +124,17 @@ function check(name, ok, detail) {
   check('no console errors on the page', (await ev('window.__errs ? window.__errs.length : 0')) === 0);
 
   console.log('back to step one: the front door');
+  /* A shared link should name a real date, not an offset that means a different day
+     depending on where it is opened. */
+  await go(BASE + '?service=gh-haircut&staff=any&date=2030-01-15&step=3');
+  check('an explicit date in a link is honoured exactly',
+    (await ev('window.__gh.ui.dateISO')) === '2030-01-15',
+    await ev('window.__gh.ui.dateISO'));
+  await go(BASE + '?service=gh-haircut&staff=any&date=not-a-date&day=2&step=3');
+  check('a malformed date falls back to the offset rather than breaking',
+    (await ev('window.__gh.ui.dateISO')) === (await ev('window.GH.addDays(window.GH.todayYmd(), 2)')),
+    await ev('window.__gh.ui.dateISO'));
+
   await go(BASE);
   check('step one leads with the salon own line', (await ev('document.getElementById("stepHeadline").textContent')).indexOf('colour, cuts') >= 0);
   check('the soonest button waits for a service', (await ev('document.getElementById("nextFreeBtn").disabled')) === true);
