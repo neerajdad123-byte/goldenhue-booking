@@ -141,9 +141,16 @@ function createStore(file) {
     return db.prepare('SELECT * FROM admin_user WHERE salon_id = ? AND email = ?').get(salonId, email) || null;
   };
 
-  q.updateAdminPassword = function (salonId, email, passwordHash, salt) {
-    db.prepare('UPDATE admin_user SET password_hash = ?, salt = ? WHERE salon_id = ? AND email = ?')
-      .run(passwordHash, salt, salonId, email);
+  /* The salon's account, whatever address it was created under. There is one per
+     salon, so this is how the environment can take it over without knowing the old
+     address. */
+  q.firstAdmin = function (salonId) {
+    return db.prepare('SELECT * FROM admin_user WHERE salon_id = ? ORDER BY email LIMIT 1').get(salonId) || null;
+  };
+
+  q.updateAdminPassword = function (salonId, email, passwordHash, salt, newEmail) {
+    db.prepare('UPDATE admin_user SET email = ?, password_hash = ?, salt = ? WHERE salon_id = ? AND email = ?')
+      .run(newEmail || email, passwordHash, salt, salonId, email);
   };
 
   /* ---------- bookings ---------- */

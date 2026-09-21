@@ -98,11 +98,18 @@ function createAuth(store) {
      forgotten password would mean losing the database or editing it by hand,
      and neither is something to ask of a salon. */
   async function syncAdminPassword(salonId, email, password) {
-    var row = await store.findAdmin(salonId, String(email).toLowerCase().trim());
+    /* Look the account up by salon, not by the address in the variable. Otherwise
+       setting a different ADMIN_EMAIL on a redeploy finds nothing, quietly does
+       nothing, and locks the owner out of a salon that already has an account.
+       There is one account per salon, so the variable replaces it either way. */
+    var wanted = String(email).toLowerCase().trim();
+    var row = await store.findAdmin(salonId, wanted) || await store.firstAdmin(salonId);
     if (!row) { return await ensureAdmin(salonId, email, password); }
-    if (sameSecret(hashPassword(String(password), row.salt), row.password_hash)) { return false; }
+    if (row.email === wanted && sameSecret(hashPassword(String(password), row.salt), row.password_hash)) {
+      return false;
+    }
     var salt = newSalt();
-    await store.updateAdminPassword(salonId, row.email, hashPassword(String(password), salt), salt);
+    await store.updateAdminPassword(salonId, row.email, hashPassword(String(password), salt), salt, wanted);
     return true;
   }
 

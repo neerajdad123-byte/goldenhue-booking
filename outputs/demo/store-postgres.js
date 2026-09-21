@@ -454,9 +454,14 @@ function createPostgresStore(url) {
     return (await q('SELECT * FROM admin_user WHERE salon_id = $1 AND email = $2', [salonId, email]))[0] || null;
   };
 
-  api.updateAdminPassword = async function (salonId, email, passwordHash, salt) {
-    await q('UPDATE admin_user SET password_hash = $1, salt = $2 WHERE salon_id = $3 AND email = $4',
-      [passwordHash, salt, salonId, email]);
+  /* The salon's account, whatever address it was created under. */
+  api.firstAdmin = async function (salonId) {
+    return (await q('SELECT * FROM admin_user WHERE salon_id = $1 ORDER BY email LIMIT 1', [salonId]))[0] || null;
+  };
+
+  api.updateAdminPassword = async function (salonId, email, passwordHash, salt, newEmail) {
+    await q('UPDATE admin_user SET email = $1, password_hash = $2, salt = $3 WHERE salon_id = $4 AND email = $5',
+      [newEmail || email, passwordHash, salt, salonId, email]);
   };
 
   api.close = async function () { if (pool) { try { await pool.end(); } catch (e) { /* already closed */ } } };

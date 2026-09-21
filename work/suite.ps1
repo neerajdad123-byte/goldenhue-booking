@@ -108,6 +108,11 @@ if ($api) {
   Write-Host "   $persist"
   if ($LASTEXITCODE -ne 0) { $fail = 1 }
 
+  Write-Host "== the owner can always get back in"
+  $takeover = node work/admin-takeover-test.js | Select-Object -Last 1
+  Write-Host "   $takeover"
+  if ($LASTEXITCODE -ne 0) { $fail = 1 }
+
   # Runs last because it installs into a scratch directory, which takes a moment.
   Write-Host "== a fresh checkout installs and boots"
   node work/deploy-test.js > work/deploy-last.log 2>&1
